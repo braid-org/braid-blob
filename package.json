@@ -1,0 +1,11 @@
+{
+  "name": "braid-blob",
+  "version": "0.0.1",
+  "description": "Library for collaborative blobs over http using braid.",
+  "author": "Braid Working Group",
+  "repository": "braid-org/braid-blob",
+  "homepage": "https://braid.org",
+  "dependencies": {
+    "braid-http": "~1.3.81"
+  }
+}
