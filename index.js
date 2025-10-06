@@ -5,24 +5,8 @@ var {http_server: braidify, free_cors} = require('braid-http'),
     port = 8888
 
 var braid_blob = {
-    storage_base: './braid-blob-files',
+    db_folder: './braid-blob-db',
     cache: {}
-}
-
-// Helper function to normalize URL and create host-specific path
-function get_storage_path(req) {
-    // Get host from request headers, default to localhost if not present
-    const host = req.headers.host || `localhost:${port}`;
-    // Remove protocol and normalize, similar to index.js
-    let normalized_host = host.replace(/^https?:\/\//, '');
-    // Remove any double slashes that might occur
-    normalized_host = normalized_host.replace(/\/+/g, '/');
-    // Ensure path doesn't start with a slash (since we'll join with storage_base)
-    if (normalized_host.startsWith('/')) normalized_host = normalized_host.substring(1);
-    // Combine host and URL for storage path
-    const combined_path = `${normalized_host}${req.url}`;
-    // Remove any double slashes that might result from concatenation
-    return combined_path.replace(/\/+/g, '/');
 }
 
 var subscriptions = {};
@@ -31,7 +15,8 @@ var subscriptions = {};
 var hash = (req) => JSON.stringify([req.headers.peer, req.url]);
 
 braid_blob.serve = async (req, res, options = {}) => {
-    if (!options.filename) options.filename = path.join(braid_blob.storage_base, get_storage_path(req))
+    if (!options.key) options.key = decodeURIComponent(req.url.split('?')[0])
+    
 
     braidify(req, res)
 
@@ -41,7 +26,7 @@ braid_blob.serve = async (req, res, options = {}) => {
     // Handle OPTIONS request
     if (req.method === 'OPTIONS') return res.end();
 
-    const filename = options.filename
+    const filename = `${braid_blob.db_folder}/${encode_filename(options.key)}`
 
     if (req.method === 'GET') {
         // Handle GET request for binary files
@@ -148,6 +133,16 @@ braid_blob.serve = async (req, res, options = {}) => {
             }
         });
     }
+}
+
+function encode_filename(filename) {
+    // Swap all "!" and "/" characters
+    let swapped = filename.replace(/[!/]/g, (match) => (match === "!" ? "/" : "!"))
+
+    // Encode the filename using encodeURIComponent()
+    let encoded = encodeURIComponent(swapped)
+
+    return encoded
 }
 
 module.exports = braid_blob
