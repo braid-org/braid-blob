@@ -74,7 +74,7 @@ braid_blob.serve = async (req, res, options = {}) => {
                 if (key_to_subs[options.key])
                     for (var [peer, sub] of key_to_subs[options.key].entries())
                         if (peer !== req.peer)
-                            sub.sendUpdate({ body, version: [`"${their_v}"`] })
+                            sub.sendUpdate({ body, version: ['' + their_v] })
 
                 res.setHeader("Version", `"${their_v}"`)
             } else res.setHeader("Version", `"${our_v}"`)
