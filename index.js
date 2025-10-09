@@ -52,7 +52,7 @@ braid_blob.serve = async (req, res, options = {}) => {
 
             if (!req.parents || 1*req.parents[0] < our_v)
                 return res.sendUpdate({
-                    version: [`"${our_v}"`],
+                    version: ['' + our_v],
                     body: !our_v ? '' : await fs.promises.readFile(filename)
                 })
             else res.write('\n\n') // get it to send headers
