@@ -68,7 +68,7 @@ braid_blob.serve = async (req, res, options = {}) => {
             if (their_v > our_v) {
                 // Write the file
                 await fs.promises.writeFile(filename, body)
-                await fs.promises.utimes(filename, new Date(their_v), new Date(their_v))
+                await fs.promises.utimes(filename, new Date(), new Date(their_v))
 
                 // Notify all subscriptions of the update (except the peer which made the PUT request itself)
                 if (key_to_subs[options.key])
