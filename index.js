@@ -13,7 +13,6 @@ var key_to_subs = {}
 braid_blob.serve = async (req, res, options = {}) => {
     if (!options.key) options.key = decodeURIComponent(req.url.split('?')[0])
 
-
     braidify(req, res)
     if (res.is_multiplexer) return
 
@@ -28,16 +27,15 @@ braid_blob.serve = async (req, res, options = {}) => {
         
         try {
             var our_v = Math.round((await fs.promises.stat(filename)).mtimeMs)
-        } catch (e) {
-            var our_v = 0
-        }
+        } catch (e) {}
 
         if (req.method === 'GET') {
             // Handle GET request for binary files
-            res.setHeader('Current-Version', `"${our_v}"`)
+            res.setHeader('Current-Version', our_v != null ? `"${our_v}"` : '')
 
             if (!req.subscribe)
-                return res.end(!our_v ? '' : await fs.promises.readFile(filename))
+                return res.end(our_v != null ?
+                    await fs.promises.readFile(filename) : '')
 
             // Start a subscription for future updates.
             if (!key_to_subs[options.key]) key_to_subs[options.key] = new Map()
@@ -50,34 +48,51 @@ braid_blob.serve = async (req, res, options = {}) => {
                     delete key_to_subs[options.key]
             }})
 
-            if (!req.parents || 1*req.parents[0] < our_v)
+
+            // Send an immediate update when:
+            if (!req.parents ||              // 1) They have no version history
+                                             //    (need full sync)
+                (our_v != null && (          // 2) We have a version AND...
+                    !req.parents.length ||   //    a) Their version is the empty set
+                    our_v > 1*req.parents[0] //    b) Our version is newer
+                )))
                 return res.sendUpdate({
-                    version: ['' + our_v],
-                    body: !our_v ? '' : await fs.promises.readFile(filename)
+                    version: our_v != null ? ['' + our_v] : [],
+                    body: our_v != null ? await fs.promises.readFile(filename) : ''
                 })
-            else res.write('\n\n') // get it to send headers
+            else res.write('\n\n') // get the node http code to send headers
         } else if (req.method === 'PUT') {
             // Handle PUT request to update binary files
 
             // Ensure directory exists
             await fs.promises.mkdir(path.dirname(filename), { recursive: true })
 
-            var their_v = req.version && 1*req.version[0]
-            if (typeof their_v != 'number') their_v = 0
-            
-            if (their_v > our_v) {
+            var their_v =
+                !req.version ?
+                    // we'll give them a version in this case
+                    Math.max(our_v != null ? our_v + 1 : 0, Date.now()) :
+                !req.version.length ?
+                    null :
+                1*req.version[0]
+
+            if (their_v != null &&
+                (our_v == null || their_v > our_v)) {
+
                 // Write the file
                 await fs.promises.writeFile(filename, body)
                 await fs.promises.utimes(filename, new Date(), new Date(their_v))
 
-                // Notify all subscriptions of the update (except the peer which made the PUT request itself)
+                // Notify all subscriptions of the update
+                // (except the peer which made the PUT request itself)
                 if (key_to_subs[options.key])
                     for (var [peer, sub] of key_to_subs[options.key].entries())
                         if (peer !== req.peer)
                             sub.sendUpdate({ body, version: ['' + their_v] })
 
                 res.setHeader("Version", `"${their_v}"`)
-            } else res.setHeader("Version", `"${our_v}"`)
+            } else {
+                res.setHeader("Version", our_v != null ? `"${our_v}"` : '')
+            }
             res.end('')
         }
     })
