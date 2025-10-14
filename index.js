@@ -37,6 +37,9 @@ braid_blob.serve = async (req, res, options = {}) => {
                 return res.end(our_v != null ?
                     await fs.promises.readFile(filename) : '')
 
+            if (!res.hasHeader("editable"))
+                res.setHeader("Editable", "true")
+
             // Start a subscription for future updates.
             if (!key_to_subs[options.key]) key_to_subs[options.key] = new Map()
             var peer = req.peer || Math.random().toString(36).slice(2)
