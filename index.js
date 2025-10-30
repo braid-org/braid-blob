@@ -31,8 +31,13 @@ braid_blob.serve = async (req, res, options = {}) => {
 
         if (req.method === 'GET') {
             // Handle GET request for binary files
-            res.setHeader('Current-Version', our_v != null ? `"${our_v}"` : '')
 
+            // Set Version header;
+            //   but if this is a subscription,
+            //     then we set Current-Version instead
+            res.setHeader((req.subscribe ? 'Current-' : '') + 'Version',
+                our_v != null ? `"${our_v}"` : '')
+                
             if (!req.subscribe)
                 return res.end(our_v != null ?
                     await fs.promises.readFile(filename) : '')
