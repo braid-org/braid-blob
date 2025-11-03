@@ -15,7 +15,7 @@ var server = require("http").createServer(async (req, res) => {
 
 server.listen(port, () => {
     console.log(`server started on port ${port}`)
-    console.log(`files stored in: ${braid_blob.storage_base}`)
+    console.log(`files stored in: ${braid_blob.db_folder}`)
 })
 
 // curl -X PUT --data-binary @image.png http://localhost:8888/image.png

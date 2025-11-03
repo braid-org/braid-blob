@@ -5,6 +5,7 @@ var {http_server: braidify, free_cors} = require('braid-http'),
 
 var braid_blob = {
     db_folder: './braid-blob-db',
+    meta_folder: './braid-blob-meta',
     cache: {}
 }
 
@@ -24,10 +25,14 @@ braid_blob.serve = async (req, res, options = {}) => {
 
     await within_fiber(options.key, async () => {
         const filename = `${braid_blob.db_folder}/${encode_filename(options.key)}`
+        const metaname = `${braid_blob.meta_folder}/${encode_filename(options.key)}`
         
+        // Read the meta file
+        var meta = {}
         try {
-            var our_v = Math.round((await fs.promises.stat(filename)).mtimeMs)
+            meta = JSON.parse(await fs.promises.readFile(metaname, 'utf8'))
         } catch (e) {}
+        var our_v = meta.version
 
         if (req.method === 'GET') {
             // Handle GET request for binary files
@@ -37,6 +42,10 @@ braid_blob.serve = async (req, res, options = {}) => {
             //     then we set Current-Version instead
             res.setHeader((req.subscribe ? 'Current-' : '') + 'Version',
                 our_v != null ? `"${our_v}"` : '')
+            
+            // Set Content-Type
+            if (meta.content_type)
+                res.setHeader('Content-Type', meta.content_type)
                 
             if (!req.subscribe)
                 return res.end(our_v != null ?
@@ -74,6 +83,7 @@ braid_blob.serve = async (req, res, options = {}) => {
 
             // Ensure directory exists
             await fs.promises.mkdir(path.dirname(filename), { recursive: true })
+            await fs.promises.mkdir(path.dirname(metaname), { recursive: true })
 
             var their_v =
                 !req.version ?
@@ -88,7 +98,12 @@ braid_blob.serve = async (req, res, options = {}) => {
 
                 // Write the file
                 await fs.promises.writeFile(filename, body)
-                await fs.promises.utimes(filename, new Date(), new Date(their_v))
+
+                // Write the meta file
+                meta.version = their_v
+                if (req.headers['content-type'])
+                    meta.content_type = req.headers['content-type']
+                await fs.promises.writeFile(metaname, JSON.stringify(meta))
 
                 // Notify all subscriptions of the update
                 // (except the peer which made the PUT request itself)
