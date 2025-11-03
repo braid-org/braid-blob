@@ -39,7 +39,15 @@ braid_blob.serve = async (req, res, options = {}) => {
 
             if (our_v == null) {
                 res.statusCode = 404
-                return res.end('')
+                res.setHeader('Content-Type', 'text/plain')
+                return res.end('File Not Found')
+            }
+
+            if (meta.content_type && req.headers.accept &&
+                !isAcceptable(meta.content_type, req.headers.accept)) {
+                res.statusCode = 406
+                res.setHeader('Content-Type', 'text/plain')
+                return res.end(`Content-Type of ${meta.content_type} not in Accept: ${req.headers.accept}`)
             }
 
             // Set Version header;
@@ -162,6 +170,34 @@ async function slurp(req) {
         req.on('data', chunk => chunks.push(chunk))
         req.on('end', () => done(Buffer.concat(chunks)))
     })
+}
+
+function isAcceptable(contentType, acceptHeader) {
+    // If no Accept header or Accept is */*, accept everything
+    if (!acceptHeader || acceptHeader === '*/*') return true;
+    
+    // Parse the Accept header into individual media types
+    const acceptTypes = acceptHeader.split(',').map(type => type.trim());
+    
+    for (const acceptType of acceptTypes) {
+        // Remove quality values (e.g., "text/html;q=0.9" -> "text/html")
+        const cleanAcceptType = acceptType.split(';')[0].trim();
+        
+        // Exact match
+        if (cleanAcceptType === contentType) return true;
+        
+        // Wildcard subtype match (e.g., "image/*" matches "image/png")
+        if (cleanAcceptType.endsWith('/*')) {
+            const acceptMain = cleanAcceptType.slice(0, -2);
+            const contentMain = contentType.split('/')[0];
+            if (acceptMain === contentMain) return true;
+        }
+        
+        // Full wildcard
+        if (cleanAcceptType === '*/*') return true;
+    }
+    
+    return false;
 }
 
 module.exports = braid_blob
