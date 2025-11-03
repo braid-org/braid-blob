@@ -37,19 +37,22 @@ braid_blob.serve = async (req, res, options = {}) => {
         if (req.method === 'GET') {
             // Handle GET request for binary files
 
+            if (our_v == null) {
+                res.statusCode = 404
+                return res.end('')
+            }
+
             // Set Version header;
             //   but if this is a subscription,
             //     then we set Current-Version instead
-            res.setHeader((req.subscribe ? 'Current-' : '') + 'Version',
-                our_v != null ? `"${our_v}"` : '')
+            res.setHeader((req.subscribe ? 'Current-' : '') + 'Version', `"${our_v}"`)
             
             // Set Content-Type
             if (meta.content_type)
                 res.setHeader('Content-Type', meta.content_type)
                 
             if (!req.subscribe)
-                return res.end(our_v != null ?
-                    await fs.promises.readFile(filename) : '')
+                return res.end(await fs.promises.readFile(filename))
 
             if (!res.hasHeader("editable"))
                 res.setHeader("Editable", "true")
@@ -67,12 +70,11 @@ braid_blob.serve = async (req, res, options = {}) => {
 
 
             // Send an immediate update when:
-            if (!req.parents ||              // 1) They have no version history
-                                             //    (need full sync)
-                (our_v != null && (          // 2) We have a version AND...
-                    !req.parents.length ||   //    a) Their version is the empty set
-                    our_v > 1*req.parents[0] //    b) Our version is newer
-                )))
+            if (!req.parents ||          // 1) They have no version history
+                                         //    (need full sync)
+                !req.parents.length ||   // 2) Or their version is the empty set
+                our_v > 1*req.parents[0] // 3) Or our version is newer
+                )
                 return res.sendUpdate({
                     version: our_v != null ? ['' + our_v] : [],
                     body: our_v != null ? await fs.promises.readFile(filename) : ''
@@ -116,6 +118,15 @@ braid_blob.serve = async (req, res, options = {}) => {
             } else {
                 res.setHeader("Version", our_v != null ? `"${our_v}"` : '')
             }
+            res.end('')
+        } else if (req.method === 'DELETE') {
+            try {
+                await fs.promises.unlink(filename)
+            } catch (e) {}
+            try {
+                await fs.promises.unlink(metaname)
+            } catch (e) {}
+            res.statusCode = 204 // No Content
             res.end('')
         }
     })
