@@ -1,0 +1,534 @@
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 10px;
+    }
+    .test {
+        margin-bottom: 3px;
+        padding: 3px;
+    }
+    .running {
+        background-color: #fffde7;
+    }
+    .passed {
+        background-color: #e8f5e9;
+    }
+    .failed {
+        background-color: #ffebee;
+    }
+    #summaryContainer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-bottom: 20px;
+    }
+    .summaryBox {
+        width: 25px;
+        height: 25px;
+        border: 1px solid #ddd;
+    }    
+</style>
+<script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
+<div id="summaryContainer"></div>
+<div id="testContainer"></div>
+<script type=module>
+
+let delay = 0
+
+function createTestDiv(testName) {
+    const div = document.createElement("div")
+    div.className = "test running"
+    div.innerHTML = `<span style="font-weight:bold">${testName}: </span><span class="result">Running...</span>`
+    testContainer.appendChild(div)
+    return div
+}
+
+function updateTestResult(div, passed, message, got, expected) {
+    div.className = `test ${passed ? "passed" : "failed"}`
+    
+    if (passed) {
+        div.querySelector(".result").textContent = message
+        div.querySelector(".result").style.fontSize = message.length > 400 ? 'xx-small' : message.length > 100 ? 'small' : ''
+    } else {
+        div.querySelector(".result").innerHTML = `${message}<br><strong>Got:</strong> ${got}<br><strong>Expected:</strong> ${expected}`
+    }
+}
+
+function createSummaryBox() {
+    var summaryContainer = document.getElementById('summaryContainer')
+    const box = document.createElement('div');
+    box.className = 'summaryBox running';
+    summaryContainer.appendChild(box);
+    return box;
+}
+
+function updateSummaryBox(box, passed) {
+    box.className = `summaryBox ${passed ? 'passed' : passed === false ? 'failed' : 'other'}`;
+}
+
+async function runTest(testName, testFunction, expectedResult) {
+    delay += 70
+
+    await new Promise(done => setTimeout(done, delay))
+    const div = createTestDiv(testName)
+    const summaryBox = createSummaryBox()
+    try {
+        let x = await testFunction()
+        if (x == expectedResult) {
+            updateTestResult(div, true, x)
+            updateSummaryBox(summaryBox, true)
+        } else {
+            updateTestResult(div, false, "Mismatch:", x, expectedResult)
+            updateSummaryBox(summaryBox, false)
+        }
+    } catch (error) {
+        updateTestResult(div, false, "Error:", error.message || error, expectedResult)
+        updateSummaryBox(summaryBox, false)
+    }
+}
+
+runTest(
+    "test send an update to another peer",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['1'],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true,
+            peer: key
+        })
+
+        var p = new Promise(done => {
+            r.subscribe(update => {
+                if (update.version?.[0] !== '2') return
+                done(update.body_text)
+                a.abort()
+            })
+        })
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['2'],
+            body: 'abc'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        return await p
+    },
+    'abc'
+)
+
+runTest(
+    "test getting a 406",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['1'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`, {
+            headers: {Accept: 'text/html'}
+        })
+        return r.status + ' ' + await r.text()
+    },
+    '406 Content-Type of text/plain not in Accept: text/html'
+)
+
+runTest(
+    "test deleting something",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['1'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'DELETE',
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return r.status
+    },
+    '404'
+)
+
+runTest(
+    "test deleting something that doesn't exist",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'DELETE',
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        return r.status
+    },
+    '204'
+)
+
+runTest(
+    "test that subscribe returns current-version header",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['1'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true
+        })
+        a.abort()
+        return r.headers.get('current-version')
+    },
+    '"1"'
+)
+
+runTest(
+    "test that subscribe returns version as string-number in array",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['1'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true
+        })
+
+        var x = await new Promise(done => {
+            r.subscribe(update => {
+                done(update.version)
+            })
+        })
+
+        a.abort()
+        return JSON.stringify(x)
+    },
+    '["1"]'
+)
+
+runTest(
+    "test that subscribe's update's versions are string-number in array",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['4'],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true,
+            parents: ['0']
+        })
+
+        var p = new Promise(done => {
+            r.subscribe(update => {
+                done(update.version)
+            })
+        })
+
+        var ret = await p
+        a.abort()
+        return JSON.stringify(ret)
+    },
+    '["4"]'
+)
+
+runTest(
+    "test that non-subscribe returns version header",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['2'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return r.headers.get('version')
+    },
+    '"2"'
+)
+
+runTest(
+    "test that PUTing at version [] doesn't do anything.",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: [],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return r.status
+    },
+    '404'
+)
+
+runTest(
+    "test that subscribe sends no version if parents is big enough.",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['3'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true,
+            parents: ['3']
+        })
+
+        var received_update = false
+        var promise_a = new Promise(done => {
+            r.subscribe(async (update) => {
+                received_update = true
+                done()                
+            })
+        })
+
+        var promise_b = new Promise(done => setTimeout(done, 300))
+
+        await Promise.race([promise_a, promise_b])
+        a.abort()
+
+        return '' + received_update
+    },
+    'false'
+)
+
+runTest(
+    "test that subscribe sends 404 if there is no file.",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            subscribe: true,
+        })
+        return r.status
+    },
+    '404'
+)
+
+runTest(
+    "test that we get 404 when file doesn't exist, on GET without subscribe.",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`)
+
+        return `${r.status}`
+    },
+    '404'
+)
+
+runTest(
+    "test second subscription to same key",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['3'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true,
+            parents: ['3']
+        })
+
+        var a2 = new AbortController()
+        var r2 = await braid_fetch(`/${key}`, {
+            signal: a2.signal,
+            subscribe: true,
+            parents: ['2']
+        })
+
+        var body = await new Promise(done => {
+            r2.subscribe((update) => done(update.body_text))
+        })
+
+        a.abort()
+        a2.abort()
+        return body
+    },
+    'xyz'
+)
+
+runTest(
+    "test PUTing when server already has blob",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['3'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['4'],
+            parents: [],
+            body: 'XYZ'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        return await (await braid_fetch(`/${key}`)).text()
+    },
+    'XYZ'
+)
+
+runTest(
+    "test PUTing when server has newer version",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['3'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['2'],
+            parents: [],
+            body: 'XYZ'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        return r.headers.get('version')
+    },
+    '"3"'
+)
+
+runTest(
+    "test that version we get back is the version we set",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['1760077018883'],
+            parents: [],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return r.headers.get('version')
+    },
+    '"1760077018883"'
+)
+
+runTest(
+    "test that subscribe gets back editable:true.",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true,
+            parents: ['3']
+        })
+
+        var ret = r.headers.get('editable')
+        a.abort()
+        return '' + ret
+    },
+    'true'
+)
+
+runTest(
+    "test that we can override editable on the server.",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            subscribe: true,
+            body: `void (async () => {
+                req.method = 'GET'
+                res.setHeader('editable', 'false')
+                braid_blob.serve(req, res, {key: ':test'})
+            })()`
+        })
+        return r1.headers.get('editable')
+
+    },
+    'false'
+)
+
+</script>

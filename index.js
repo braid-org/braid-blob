@@ -84,8 +84,9 @@ braid_blob.serve = async (req, res, options = {}) => {
                 our_v > 1*req.parents[0] // 3) Or our version is newer
                 )
                 return res.sendUpdate({
-                    version: our_v != null ? ['' + our_v] : [],
-                    body: our_v != null ? await fs.promises.readFile(filename) : ''
+                    version: ['' + our_v],
+                    'Merge-Type': 'lww',
+                    body: await fs.promises.readFile(filename)
                 })
             else res.write('\n\n') // get the node http code to send headers
         } else if (req.method === 'PUT') {
@@ -120,7 +121,11 @@ braid_blob.serve = async (req, res, options = {}) => {
                 if (key_to_subs[options.key])
                     for (var [peer, sub] of key_to_subs[options.key].entries())
                         if (peer !== req.peer)
-                            sub.sendUpdate({ body, version: ['' + their_v] })
+                            sub.sendUpdate({
+                                version: ['' + their_v],
+                                'Merge-Type': 'lww',
+                                body
+                            })
 
                 res.setHeader("Version", `"${their_v}"`)
             } else {
