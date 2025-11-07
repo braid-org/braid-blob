@@ -4,7 +4,6 @@ var port = process.argv[2] || 8889
 var braid_blob = require(`${__dirname}/../index.js`)
 var {free_cors} = require("braid-http")
 braid_blob.db_folder = `${__dirname}/test_db_folder`
-braid_blob.meta_folder = `${__dirname}/test_meta_folder`
 
 var server = require("http").createServer(async (req, res) => {
     console.log(`${req.method} ${req.url}`)

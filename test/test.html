@@ -90,6 +90,152 @@ async function runTest(testName, testFunction, expectedResult) {
 }
 
 runTest(
+    "test that peer.txt gets initialized on a fresh run",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var db_name = 'test-db-' + Math.random().toString(36).slice(2)
+
+                var new_bb = braid_blob.create_braid_blob()
+                new_bb.db_folder = __dirname + '/' + db_name
+
+                try {
+                    await new_bb.serve({}, {})
+                } catch (e) {}
+
+                await require('fs').promises.rm(new_bb.db_folder,
+                    { recursive: true, force: true })
+
+                res.end(new_bb.peer)
+
+            })()`
+        })
+        return '' + ((await r1.text()).length > 5)
+    },
+    'true'
+)
+
+runTest(
+    "test that peer is same the second time we run from same db folder",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var db = __dirname + '/test-db-' + Math.random().toString(36).slice(2)
+
+                var bb1 = braid_blob.create_braid_blob()
+                bb1.db_folder = db
+
+                try {
+                    await bb1.serve({}, {})
+                } catch (e) {}
+
+                var bb2 = braid_blob.create_braid_blob()
+                bb2.db_folder = db
+
+                try {
+                    await bb2.serve({}, {})
+                } catch (e) {}
+
+                await require('fs').promises.rm(db, { recursive: true, force: true })
+
+                res.end('' + (bb1.peer === bb2.peer))
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test that we can set the peer of a braid_blob object",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var db = __dirname + '/test-db-' + Math.random().toString(36).slice(2)
+
+                var bb1 = braid_blob.create_braid_blob()
+                bb1.db_folder = db
+                bb1.peer = 'test_peer'
+
+                try {
+                    await bb1.serve({}, {})
+                } catch (e) {}
+
+                await require('fs').promises.rm(db, { recursive: true, force: true })
+
+                res.end(bb1.peer)
+            })()`
+        })
+        return await r1.text()
+    },
+    'test_peer'
+)
+
+runTest(
+    "test that PUTing with shorter event id doesn't do anything.",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['11'],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['9'],
+            body: 'abc'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return await r.text()
+    },
+    'xyz'
+)
+
+runTest(
+    "test that we ignore stuff after the ? in a url",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}?blah`, {
+            method: 'PUT',
+            version: ['11'],
+            body: 'yo!'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return await r.text()
+    },
+    'yo!'
+)
+
+runTest(
+    "test that we ignore stuff after the # in a url",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}#blah?bloop`, {
+            method: 'PUT',
+            version: ['11'],
+            body: 'hi!'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key}`)
+        return await r.text()
+    },
+    'hi!'
+)
+
+runTest(
     "test send an update to another peer",
     async () => {
         var key = 'test-' + Math.random().toString(36).slice(2)
@@ -128,6 +274,80 @@ runTest(
         return await p
     },
     'abc'
+)
+
+runTest(
+    "test having multiple subs",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        var key2 = 'test2-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['1'],
+            body: 'xyz'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            signal: a.signal,
+            subscribe: true,
+            peer: key
+        })
+
+        var p = new Promise(done => {
+            r.subscribe(update => {
+                if (update.version?.[0] !== '2') return
+                done(update.body_text)
+            })
+        })
+
+        var r = await braid_fetch(`/${key2}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['1'],
+            body: 'xyz2'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var a = new AbortController()
+        var r = await braid_fetch(`/${key2}`, {
+            signal: a.signal,
+            subscribe: true,
+            peer: key2
+        })
+
+        var p2 = new Promise(done => {
+            r.subscribe(update => {
+                if (update.version?.[0] !== '2') return
+                done(update.body_text)
+            })
+        })
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['2'],
+            body: 'abc'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var r = await braid_fetch(`/${key2}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'text/plain'},
+            version: ['2'],
+            body: 'abc2'
+        })
+        if (!r.ok) throw 'got: ' + r.statusCode
+
+        var ret = await Promise.all([p, p2])
+        a.abort()
+        return 'got: ' + ret
+
+    },
+    'got: abc,abc2'
 )
 
 runTest(
