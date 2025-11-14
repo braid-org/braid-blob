@@ -1,35 +1,165 @@
 var {http_server: braidify, free_cors} = require('braid-http'),
+    {url_file_db} = require('url-file-db'),
     fs = require('fs'),
     path = require('path')
 
 function create_braid_blob() {
     var braid_blob = {
         db_folder: './braid-blob-db',
+        meta_folder: './braid-blob-meta',
         cache: {},
         key_to_subs: {},
-        peer: null // we'll try to load this from a file, if not set by the user
+        peer: null, // we'll try to load this from a file, if not set by the user
+        db: null // url-file-db instance
     }
 
     braid_blob.init = async () => {
-        braid_blob.init = () => {}
+        // We only want to initialize once
+        var init_p = real_init()
+        braid_blob.init = () => init_p
+        await braid_blob.init()
 
-        await fs.promises.mkdir(`${braid_blob.db_folder}/blob`, { recursive: true })
-        await fs.promises.mkdir(`${braid_blob.db_folder}/meta`, { recursive: true })
+        async function real_init() {
+            // Create url-file-db instance for blob storage
+            braid_blob.db = await url_file_db.create(braid_blob.db_folder, async (key) => {
+                // File changed externally, notify subscriptions
+                var body = await braid_blob.db.read(key)
+                await braid_blob.put(key, body, { skip_write: true })
+            })
 
-        // establish a peer id
-        if (!braid_blob.peer)
-            try {
-                braid_blob.peer = await fs.promises.readFile(`${braid_blob.db_folder}/peer.txt`, 'utf8')
-            } catch (e) {}
-        if (!braid_blob.peer)
-            braid_blob.peer = Math.random().toString(36).slice(2)
-        await fs.promises.writeFile(`${braid_blob.db_folder}/peer.txt`, braid_blob.peer)
+            // Create meta folder
+            await fs.promises.mkdir(braid_blob.meta_folder, { recursive: true })
+
+            // establish a peer id
+            if (!braid_blob.peer)
+                try {
+                    braid_blob.peer = await fs.promises.readFile(`${braid_blob.meta_folder}/peer.txt`, 'utf8')
+                } catch (e) {}
+            if (!braid_blob.peer)
+                braid_blob.peer = Math.random().toString(36).slice(2)
+            await fs.promises.writeFile(`${braid_blob.meta_folder}/peer.txt`, braid_blob.peer)
+        }
+    }
+
+    braid_blob.put = async (key, body, options = {}) => {
+        await braid_blob.init()
+
+        // Read the meta file
+        const metaname = `${braid_blob.meta_folder}/${encode_filename(key)}`
+        var meta = {}
+        try {
+            meta = JSON.parse(await fs.promises.readFile(metaname, 'utf8'))
+        } catch (e) {}
+
+        var their_e =
+            !options.version ?
+                // we'll give them a event id in this case
+                `${braid_blob.peer}-${Math.max(Date.now(),
+                    meta.event ? 1*get_event_seq(meta.event) + 1 : -Infinity)}` :
+            !options.version.length ?
+                null :
+            options.version[0]
+
+        if (their_e != null &&
+            (meta.event == null ||
+                compare_events(their_e, meta.event) > 0)) {
+            meta.event = their_e
+
+            // Write the file using url-file-db (unless skip_write is set)
+            if (!options.skip_write)
+                await braid_blob.db.write(key, body)
+
+            // Write the meta file
+            if (options.content_type)
+                meta.content_type = options.content_type
+
+            await fs.promises.writeFile(metaname, JSON.stringify(meta))
+
+            // Notify all subscriptions of the update
+            // (except the peer which made the PUT request itself)
+            if (braid_blob.key_to_subs[key])
+                for (var [peer, sub] of braid_blob.key_to_subs[key].entries())
+                    if (peer !== options.peer)
+                        sub.sendUpdate({
+                            version: [meta.event],
+                            'Merge-Type': 'lww',
+                            body
+                        })
+        }
+
+        return meta.event
+    }
+
+    braid_blob.get = async (key, options = {}) => {
+        await braid_blob.init()
+
+        // Read the meta file
+        const metaname = `${braid_blob.meta_folder}/${encode_filename(key)}`
+        var meta = {}
+        try {
+            meta = JSON.parse(await fs.promises.readFile(metaname, 'utf8'))
+        } catch (e) {}
+        if (meta.event == null) return null
+
+        var result = {
+            version: [meta.event],
+            content_type: meta.content_type
+        }
+        if (options.header_cb) await options.header_cb(result)
+        if (options.head) return
+
+        if (options.subscribe) {
+            var subscribe_chain = Promise.resolve()
+            options.my_subscribe = (x) => subscribe_chain =
+                subscribe_chain.then(() => options.subscribe(x))
+
+            // Start a subscription for future updates
+            if (!braid_blob.key_to_subs[key])
+                braid_blob.key_to_subs[key] = new Map()
+
+            var peer = options.peer || Math.random().toString(36).slice(2)
+            braid_blob.key_to_subs[key].set(peer, {
+                sendUpdate: (update) => {
+                    options.my_subscribe({
+                        body: update.body,
+                        version: update.version,
+                        content_type: meta.content_type
+                    })
+                }
+            })
+
+            // Store unsubscribe function
+            result.unsubscribe = () => {
+                braid_blob.key_to_subs[key].delete(peer)
+                if (!braid_blob.key_to_subs[key].size)
+                    delete braid_blob.key_to_subs[key]
+            }
+
+            if (options.before_send_cb) await options.before_send_cb(result)
+
+            // Send an immediate update if needed
+            if (!options.parents ||
+                !options.parents.length ||
+                compare_events(result.version[0], options.parents[0]) > 0) {
+                result.sent = true
+                options.my_subscribe({
+                    body: await braid_blob.db.read(key),
+                    version: result.version,
+                    content_type: result.content_type
+                })
+            }
+        } else {
+            // If not subscribe, send the body now
+            result.body = await braid_blob.db.read(key)
+        }
+
+        return result
     }
 
     braid_blob.serve = async (req, res, options = {}) => {
         await braid_blob.init()
 
-        if (!options.key) options.key = decodeURIComponent(req.url.split('?')[0])
+        if (!options.key) options.key = url_file_db.get_key(req.url)
 
         braidify(req, res)
         if (res.is_multiplexer) return
@@ -41,8 +171,7 @@ function create_braid_blob() {
         var body = req.method === 'PUT' && await slurp(req)
 
         await within_fiber(options.key, async () => {
-            const filename = `${braid_blob.db_folder}/blob/${encode_filename(options.key)}`
-            const metaname = `${braid_blob.db_folder}/meta/${encode_filename(options.key)}`
+            const metaname = `${braid_blob.meta_folder}/${encode_filename(options.key)}`
 
             // Read the meta file
             var meta = {}
@@ -51,102 +180,62 @@ function create_braid_blob() {
             } catch (e) {}
 
             if (req.method === 'GET') {
-                // Handle GET request for binary files
+                if (!res.hasHeader("editable")) res.setHeader("Editable", "true")
+                if (!req.subscribe) res.setHeader("Accept-Subscribe", "true")
+                res.setHeader("Merge-Type", "lww")
 
-                if (meta.event == null) {
+                var result = await braid_blob.get(options.key, {
+                    peer: req.peer,
+                    head: req.method == "HEAD",
+                    parents: req.parents || null,
+                    header_cb: (result) => {
+                        res.setHeader((req.subscribe ? "Current-" : "") +
+                            "Version", ascii_ify(result.version.map((x) =>
+                                JSON.stringify(x)).join(", ")))
+                        if (result.content_type)
+                            res.setHeader('Content-Type', result.content_type)
+                    },
+                    before_send_cb: (result) =>
+                        res.startSubscription({ onClose: result.unsubscribe }),
+                    subscribe: req.subscribe ? (update) => {
+                        res.sendUpdate({
+                            version: update.version,
+                            'Merge-Type': 'lww',
+                            body: update.body
+                        })
+                    } : null
+                })
+
+                if (!result) {
                     res.statusCode = 404
-                    res.setHeader('Content-Type', 'text/plain')
                     return res.end('File Not Found')
                 }
 
-                if (meta.content_type && req.headers.accept &&
-                    !isAcceptable(meta.content_type, req.headers.accept)) {
+                if (result.content_type && req.headers.accept &&
+                    !isAcceptable(result.content_type, req.headers.accept)) {
                     res.statusCode = 406
-                    res.setHeader('Content-Type', 'text/plain')
-                    return res.end(`Content-Type of ${meta.content_type} not in Accept: ${req.headers.accept}`)
+                    return res.end(`Content-Type of ${result.content_type} not in Accept: ${req.headers.accept}`)
                 }
 
-                // Set Version header;
-                //   but if this is a subscription,
-                //     then we set Current-Version instead
-                res.setHeader((req.subscribe ? 'Current-' : '') + 'Version',
-                    JSON.stringify(meta.event))
-
-                // Set Content-Type
-                if (meta.content_type)
-                    res.setHeader('Content-Type', meta.content_type)
-
-                if (!req.subscribe)
-                    return res.end(await fs.promises.readFile(filename))
-
-                if (!res.hasHeader("editable"))
-                    res.setHeader("Editable", "true")
-
-                // Start a subscription for future updates.
-                if (!braid_blob.key_to_subs[options.key])
-                    braid_blob.key_to_subs[options.key] = new Map()
-                var peer = req.peer || Math.random().toString(36).slice(2)
-                braid_blob.key_to_subs[options.key].set(peer, res)
-
-                res.startSubscription({ onClose: () => {
-                    braid_blob.key_to_subs[options.key].delete(peer)
-                    if (!braid_blob.key_to_subs[options.key].size)
-                        delete braid_blob.key_to_subs[options.key]
-                }})
-
-                // Send an immediate update when:
-                if (!req.parents ||            // 1) They want everything,
-                    !req.parents.length ||     // 2) Or everything past the empty set,
-                    compare_events(meta.event, req.parents[0]) > 0
-                                            // 3) Or what we have is newer
-                )
-                    return res.sendUpdate({
-                        version: [meta.event],
-                        'Merge-Type': 'lww',
-                        body: await fs.promises.readFile(filename)
-                    })
-                else res.write('\n\n') // get the node http code to send headers
+                if (req.method == "HEAD") return res.end('')
+                else if (!req.subscribe) return res.end(result.body)
+                else {
+                    // If no immediate update was sent,
+                    // get the node http code to send headers
+                    if (!result.sent) res.write('\n\n') 
+                }
             } else if (req.method === 'PUT') {
                 // Handle PUT request to update binary files
-
-                var their_e =
-                    !req.version ?
-                        // we'll give them a event id in this case
-                        `${braid_blob.peer}-${Math.max(Date.now(),
-                            meta.event ? 1*get_event_seq(meta.event) + 1 : -Infinity)}` :
-                    !req.version.length ?
-                        null :
-                    req.version[0]
-
-                if (their_e != null &&
-                    (meta.event == null ||
-                        compare_events(their_e, meta.event) > 0)) {
-                    meta.event = their_e
-
-                    // Write the file
-                    await fs.promises.writeFile(filename, body)
-
-                    // Write the meta file
-                    if (req.headers['content-type'])
-                        meta.content_type = req.headers['content-type']
-                    await fs.promises.writeFile(metaname, JSON.stringify(meta))
-
-                    // Notify all subscriptions of the update
-                    // (except the peer which made the PUT request itself)
-                    if (braid_blob.key_to_subs[options.key])
-                        for (var [peer, sub] of braid_blob.key_to_subs[options.key].entries())
-                            if (peer !== req.peer)
-                                sub.sendUpdate({
-                                    version: [meta.event],
-                                    'Merge-Type': 'lww',
-                                    body
-                                })
-                }
-                res.setHeader("Version", meta.event != null ? JSON.stringify(meta.event) : '')
+                meta.event = await braid_blob.put(options.key, body, {
+                    version: req.version,
+                    content_type: req.headers['content-type'],
+                    peer: req.peer
+                })
+                res.setHeader("Version", version_to_header(meta.event != null ? [meta.event] : []))
                 res.end('')
             } else if (req.method === 'DELETE') {
                 try {
-                    await fs.promises.unlink(filename)
+                    await braid_blob.db.delete(options.key)
                 } catch (e) {}
                 try {
                     await fs.promises.unlink(metaname)
@@ -174,6 +263,16 @@ function create_braid_blob() {
         for (let i = e.length - 1; i >= 0; i--)
             if (e[i] === '-') return e.slice(i + 1)
         return e
+    }
+
+    function ascii_ify(s) {
+        return s.replace(/[^\x20-\x7E]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+    }
+
+    function version_to_header(version) {
+        // Convert version array to header format: JSON without outer brackets
+        if (!version || !version.length) return ''
+        return ascii_ify(version.map(v => JSON.stringify(v)).join(', '))
     }
 
     function encode_filename(filename) {

@@ -5,7 +5,8 @@ var braid_blob = require(`${__dirname}/index.js`)
 // TODO: set a custom storage base
 // (the default is ./braid-blob-files)
 //
-// braid_blob.storage_base = './custom_files_folder'
+// braid_blob.db_folder = './custom_files_folder'
+// braid_blob.meta_folder = './custom_meta_folder'
 
 var server = require("http").createServer(async (req, res) => {
     console.log(`${req.method} ${req.url}`)
@@ -18,5 +19,5 @@ server.listen(port, () => {
     console.log(`files stored in: ${braid_blob.db_folder}`)
 })
 
-// curl -X PUT --data-binary @image.png http://localhost:8888/image.png
-// curl http://localhost:8888/image.png --output downloaded_image.png
+// curl -X PUT --data-binary @blob.png http://localhost:8888/blob.png
+// curl http://localhost:8888/blob.png --output new-blob.png

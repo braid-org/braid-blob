@@ -61,8 +61,13 @@ curl -X DELETE http://localhost:8888/text
 ```javascript
 var braid_blob = require('braid-blob')
 
-// Set custom storage location (default: './braid-blob-db')
+// Set custom blob storage location (default: './braid-blob-db')
+// This uses url-file-db for efficient URL-to-file mapping
 braid_blob.db_folder = './custom_files_folder'
+
+// Set custom metadata storage location (default: './braid-blob-meta')
+// Stores version metadata and peer information
+braid_blob.meta_folder = './custom_meta_folder'
 
 // Set custom peer ID (default: auto-generated and persisted)
 braid_blob.peer = 'my-server-id'
