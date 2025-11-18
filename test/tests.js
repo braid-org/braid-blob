@@ -725,6 +725,423 @@ runTest(
     '"100"|"200"'
 )
 
+runTest(
+    "test put with URL (no content_type)",
+    async () => {
+        var key = 'test-url-put-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var braid_blob = require(\`\${__dirname}/../index.js\`)
+                var url = new URL('http://localhost:' + req.socket.localPort + '/${key}')
+                await braid_blob.put(url, Buffer.from('url put test'), { version: ['100'] })
+                res.end('done')
+            })()`
+        })
+        await r1.text()
+
+        var r = await braid_fetch(`/${key}`)
+        return await r.text()
+    },
+    'url put test'
+)
+
+runTest(
+    "test put with URL (with content_type)",
+    async () => {
+        var key = 'test-url-put-ct-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var braid_blob = require(\`\${__dirname}/../index.js\`)
+                var url = new URL('http://localhost:' + req.socket.localPort + '/${key}')
+                await braid_blob.put(url, Buffer.from('url put with ct'), {
+                    version: ['200'],
+                    content_type: 'text/plain'
+                })
+                res.end('done')
+            })()`
+        })
+        await r1.text()
+
+        var r = await braid_fetch(`/${key}`)
+        return r.headers.get('content-type') + '|' + await r.text()
+    },
+    'text/plain|url put with ct'
+)
+
+runTest(
+    "test get with URL (no subscribe)",
+    async () => {
+        var key = 'test-url-get-' + Math.random().toString(36).slice(2)
+
+        await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['300'],
+            body: 'url get test'
+        })
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var braid_blob = require(\`\${__dirname}/../index.js\`)
+                var url = new URL('http://localhost:' + req.socket.localPort + '/${key}')
+                var result = await braid_blob.get(url)
+                res.end(Buffer.from(result).toString('utf8'))
+            })()`
+        })
+
+        return await r1.text()
+    },
+    'url get test'
+)
+
+runTest(
+    "test get with URL (with subscribe)",
+    async () => {
+        var key = 'test-url-get-sub-' + Math.random().toString(36).slice(2)
+
+        await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['400'],
+            body: 'initial'
+        })
+
+        // Use a promise to wait for the eval to complete
+        var evalPromise = braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var braid_blob = require(\`\${__dirname}/../index.js\`)
+                var url = new URL('http://localhost:' + req.socket.localPort + '/${key}')
+
+                var updates = []
+                var a = new AbortController()
+
+                // Don't await - braid_blob.get returns immediately when subscribe is used
+                braid_blob.get(url, {
+                    subscribe: update => {
+                        updates.push(Buffer.from(update.body).toString('utf8'))
+                        if (updates.length === 2) {
+                            a.abort()
+                            res.end(updates.join('|'))
+                        }
+                    },
+                    signal: a.signal
+                })
+            })()`
+        })
+
+        // Wait a bit for subscription to be established
+        await new Promise(done => setTimeout(done, 100))
+
+        // Send update
+        await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['500'],
+            body: 'updated'
+        })
+
+        // Wait for the eval to complete
+        var r1 = await evalPromise
+        return await r1.text()
+    },
+    'initial|updated'
+)
+
+runTest(
+    "test sync local to remote",
+    async () => {
+        var local_key = 'test-sync-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-remote-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Put something locally first
+                    await braid_blob.put('${local_key}', Buffer.from('local content'), { version: ['600'] })
+
+                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+
+                    // Start sync
+                    braid_blob.sync('${local_key}', remote_url)
+
+                    res.end('syncing')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+        if (result.startsWith('error:')) return result
+
+        // Wait a bit for sync to happen
+        await new Promise(done => setTimeout(done, 100))
+
+        // Check remote has the content
+        var r = await braid_fetch(`/${remote_key}`)
+        return await r.text()
+    },
+    'local content'
+)
+
+runTest(
+    "test sync two local keys",
+    async () => {
+        var key1 = 'test-sync-local1-' + Math.random().toString(36).slice(2)
+        var key2 = 'test-sync-local2-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Put something to first key
+                    await braid_blob.put('${key1}', Buffer.from('sync local content'), { version: ['700'] })
+
+                    // Start sync between two local keys
+                    braid_blob.sync('${key1}', '${key2}')
+
+                    res.end('syncing')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+        if (result.startsWith('error:')) return result
+
+        // Wait a bit for sync to happen
+        await new Promise(done => setTimeout(done, 100))
+
+        // Check second key has the content
+        var r = await braid_fetch(`/${key2}`)
+        return await r.text()
+    },
+    'sync local content'
+)
+
+runTest(
+    "test sync remote to local (swap)",
+    async () => {
+        var local_key = 'test-sync-swap-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-swap-remote-' + Math.random().toString(36).slice(2)
+
+        // Put something on the server first
+        await braid_fetch(`/${remote_key}`, {
+            method: 'PUT',
+            version: ['800'],
+            body: 'remote content'
+        })
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+
+                    // Start sync with URL as first argument (should swap internally)
+                    braid_blob.sync(remote_url, '${local_key}')
+
+                    res.end('syncing')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+        if (result.startsWith('error:')) return result
+
+        // Wait a bit for sync to happen
+        await new Promise(done => setTimeout(done, 100))
+
+        // Check local key has the remote content
+        var r = await braid_fetch(`/${local_key}`)
+        return await r.text()
+    },
+    'remote content'
+)
+
+runTest(
+    "test sync when server already has our version",
+    async () => {
+        var local_key = 'test-sync-has-version-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-has-version-remote-' + Math.random().toString(36).slice(2)
+
+        // Put the same content on both local and remote with the same version
+        var version = ['900']
+        var content = 'shared content'
+
+        // Put on remote first
+        await braid_fetch(`/${remote_key}`, {
+            method: 'PUT',
+            version: version,
+            body: content
+        })
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Put the same content locally with the same version
+                    await braid_blob.put('${local_key}', Buffer.from('${content}'), { version: ${JSON.stringify(version)} })
+
+                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+
+                    // Start sync - this should trigger the "server already has our version" path
+                    braid_blob.sync('${local_key}', remote_url)
+
+                    res.end('syncing')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+        if (result.startsWith('error:')) return result
+
+        // Wait a bit for sync to initialize (the console.log should happen quickly)
+        await new Promise(done => setTimeout(done, 100))
+
+        // Verify that both still have the same content
+        var r = await braid_fetch(`/${remote_key}`)
+        return await r.text()
+    },
+    'shared content'
+)
+
+runTest(
+    "test sync closed during error",
+    async () => {
+        var local_key = 'test-sync-closed-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-closed-remote-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Use an invalid/unreachable URL to trigger an error
+                    var remote_url = new URL('http://localhost:9999/${remote_key}')
+
+                    // Start sync
+                    var sync_options = {}
+                    braid_blob.sync('${local_key}', remote_url, sync_options)
+
+                    // Close the sync immediately to trigger the closed path when error occurs
+                    sync_options.my_unsync()
+
+                    res.end('sync started and closed')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+        if (result.startsWith('error:')) return result
+
+        // Wait for the connection error and closed message
+        await new Promise(done => setTimeout(done, 200))
+
+        return result
+    },
+    'sync started and closed'
+)
+
+runTest(
+    "test sync error with retry",
+    async () => {
+        var local_key = 'test-sync-retry-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-retry-remote-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Use an invalid/unreachable URL to trigger an error
+                    var remote_url = new URL('http://localhost:9999/${remote_key}')
+
+                    // Start sync without closing it - should trigger retry
+                    var sync_options = {}
+                    braid_blob.sync('${local_key}', remote_url, sync_options)
+
+                    // Wait a bit for the error to occur and retry message to print
+                    await new Promise(done => setTimeout(done, 200))
+
+                    // Now close it to stop retrying
+                    sync_options.my_unsync()
+
+                    res.end('sync error occurred')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+
+        return result
+    },
+    'sync error occurred'
+)
+
+runTest(
+    "test requesting with version/parents server doesn't have",
+    async () => {
+        var key = 'test-parents-unknown-' + Math.random().toString(36).slice(2)
+
+        // Put with version 100
+        await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['100'],
+            body: 'content v100'
+        })
+
+        // Try to subscribe with parents 200 (newer than what server has)
+        // This triggers the "unkown version" error which gets caught and returns 309
+        var r = await braid_fetch(`/${key}`, {
+            subscribe: true,
+            parents: ['200']
+        })
+
+        return r.status
+    },
+    '309'
+)
+
+runTest(
+    "test requesting specific version server doesn't have",
+    async () => {
+        var key = 'test-version-unknown-' + Math.random().toString(36).slice(2)
+
+        // Put with version 100
+        await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['100'],
+            body: 'content v100'
+        })
+
+        // Try to GET with version 200 (newer than what server has)
+        // This should trigger line 269 when req.version is checked
+        var r = await braid_fetch(`/${key}`, {
+            version: ['200']
+        })
+
+        return r.status
+    },
+    '309'
+)
+
 }
 
 // Export for Node.js (CommonJS)

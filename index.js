@@ -1,4 +1,4 @@
-var {http_server: braidify} = require('braid-http'),
+var {http_server: braidify, fetch: braid_fetch} = require('braid-http'),
     {url_file_db} = require('url-file-db'),
     fs = require('fs'),
     path = require('path')
@@ -44,6 +44,29 @@ function create_braid_blob() {
     }
 
     braid_blob.put = async (key, body, options = {}) => {
+        // Handle URL case - make a remote PUT request
+        if (key instanceof URL) {
+            options.my_abort = new AbortController()
+            if (options.signal) {
+                options.signal.addEventListener('abort', () =>
+                    options.my_abort.abort())
+            }
+
+            var params = {
+                method: 'PUT',
+                signal: options.my_abort.signal,
+                retry: () => true,
+                body: body
+            }
+            for (var x of ['headers', 'version', 'peer'])
+                if (options[x] != null) params[x] = options[x]
+            if (options.content_type) {
+                params.headers = { ...params.headers, 'Content-Type': options.content_type }
+            }
+
+            return await braid_fetch(key.href, params)
+        }
+
         await braid_blob.init()
 
         // Read the meta data from meta_db
@@ -92,6 +115,42 @@ function create_braid_blob() {
     }
 
     braid_blob.get = async (key, options = {}) => {
+        // Handle URL case - make a remote GET request
+        if (key instanceof URL) {
+            options.my_abort = new AbortController()
+
+            var params = {
+                signal: options.my_abort.signal,
+                subscribe: !!options.subscribe,
+                heartbeats: 120,
+            }
+            if (!options.dont_retry) {
+                params.retry = () => true
+            }
+            for (var x of ['headers', 'parents', 'version', 'peer'])
+                if (options[x] != null) params[x] = options[x]
+
+            var res = await braid_fetch(key.href, params)
+
+            if (options.subscribe) {
+                if (options.dont_retry) {
+                    var error_happened
+                    var error_promise = new Promise((_, fail) => error_happened = fail)
+                }
+
+                res.subscribe(async update => {
+                    await options.subscribe(update)
+                }, e => options.dont_retry && error_happened(e))
+
+                if (options.dont_retry) {
+                    return await error_promise
+                }
+                return res
+            } else {
+                return await res.arrayBuffer()
+            }
+        }
+
         await braid_blob.init()
 
         // Read the meta data from meta_db
@@ -106,6 +165,11 @@ function create_braid_blob() {
             content_type: meta.content_type
         }
         if (options.header_cb) await options.header_cb(result)
+        // Check if requested version/parents is newer than what we have - if so, we don't have it
+        if (options.version && options.version.length && compare_events(options.version[0], meta.event) > 0)
+            throw new Error('unkown version: ' + options.version)
+        if (options.parents && options.parents.length && compare_events(options.parents[0], meta.event) > 0)
+            throw new Error('unkown version: ' + options.parents)
         if (options.head) return
 
         if (options.subscribe) {
@@ -177,32 +241,42 @@ function create_braid_blob() {
             if (meta_content)
                 meta = JSON.parse(meta_content.toString('utf8'))
 
-            if (req.method === 'GET') {
+            if (req.method === 'GET' || req.method === 'HEAD') {
                 if (!res.hasHeader("editable")) res.setHeader("Editable", "true")
                 if (!req.subscribe) res.setHeader("Accept-Subscribe", "true")
                 res.setHeader("Merge-Type", "lww")
 
-                var result = await braid_blob.get(options.key, {
-                    peer: req.peer,
-                    head: req.method == "HEAD",
-                    parents: req.parents || null,
-                    header_cb: (result) => {
-                        res.setHeader((req.subscribe ? "Current-" : "") +
-                            "Version", ascii_ify(result.version.map((x) =>
-                                JSON.stringify(x)).join(", ")))
-                        if (result.content_type)
-                            res.setHeader('Content-Type', result.content_type)
-                    },
-                    before_send_cb: (result) =>
-                        res.startSubscription({ onClose: result.unsubscribe }),
-                    subscribe: req.subscribe ? (update) => {
-                        res.sendUpdate({
-                            version: update.version,
-                            'Merge-Type': 'lww',
-                            body: update.body
-                        })
-                    } : null
-                })
+                try {
+                    var result = await braid_blob.get(options.key, {
+                        peer: req.peer,
+                        head: req.method == "HEAD",
+                        version: req.version || null,
+                        parents: req.parents || null,
+                        header_cb: (result) => {
+                            res.setHeader((req.subscribe ? "Current-" : "") +
+                                "Version", ascii_ify(result.version.map((x) =>
+                                    JSON.stringify(x)).join(", ")))
+                            if (result.content_type)
+                                res.setHeader('Content-Type', result.content_type)
+                        },
+                        before_send_cb: (result) =>
+                            res.startSubscription({ onClose: result.unsubscribe }),
+                        subscribe: req.subscribe ? (update) => {
+                            res.sendUpdate({
+                                version: update.version,
+                                'Merge-Type': 'lww',
+                                body: update.body
+                            })
+                        } : null
+                    })
+                } catch (e) {
+                    if (e.message && e.message.startsWith('unkown version')) {
+                        // Server doesn't have this version
+                        res.statusCode = 309
+                        res.statusMessage = 'Version Unknown Here'
+                        return res.end('')
+                    } else throw e
+                }
 
                 if (!result) {
                     res.statusCode = 404
@@ -238,6 +312,109 @@ function create_braid_blob() {
                 res.end('')
             }
         })
+    }
+
+    braid_blob.sync = async (a, b, options = {}) => {
+        var unsync_cbs = []
+        options.my_unsync = () => unsync_cbs.forEach(cb => cb())
+
+        if ((a instanceof URL) === (b instanceof URL)) {
+            // Both are URLs or both are local keys
+            var a_ops = {
+                subscribe: update => braid_blob.put(b, update.body, {
+                    version: update.version,
+                    content_type: update.headers?.['content-type']
+                })
+            }
+            braid_blob.get(a, a_ops)
+
+            var b_ops = {
+                subscribe: update => braid_blob.put(a, update.body, {
+                    version: update.version,
+                    content_type: update.headers?.['content-type']
+                })
+            }
+            braid_blob.get(b, b_ops)
+        } else {
+            // One is local, one is remote - make a=local and b=remote (swap if not)
+            if (a instanceof URL) {
+                let swap = a; a = b; b = swap
+            }
+
+            var closed = false
+            options.my_unsync = () => { closed = true; disconnect() }
+
+            var disconnect = () => { }
+            async function connect() {
+                var ac = new AbortController()
+                var disconnect_cbs = [() => ac.abort()]
+                disconnect = () => disconnect_cbs.forEach(cb => cb())
+
+                try {
+                    // Check if remote has our current version (simple fork-point check)
+                    var local_result = await braid_blob.get(a)
+                    var local_version = local_result ? local_result.version : null
+                    var server_has_our_version = false
+
+                    if (local_version) {
+                        // Check if server has our version
+                        var r = await braid_fetch(b.href, {
+                            signal: ac.signal,
+                            method: "HEAD",
+                            version: local_version
+                        })
+                        server_has_our_version = r.ok
+                    }
+
+                    // Local -> remote: subscribe to future local changes
+                    var a_ops = {
+                        subscribe: update => {
+                            update.signal = ac.signal
+                            braid_blob.put(b, update.body, {
+                                version: update.version,
+                                content_type: update.content_type
+                            }).catch(e => {
+                                if (e.name === 'AbortError') {
+                                    // ignore
+                                } else throw e
+                            })
+                        }
+                    }
+                    // Only set parents if server already has our version
+                    // If server doesn't have it, omit parents so subscription sends everything
+                    if (server_has_our_version) {
+                        a_ops.parents = local_version
+                    }
+                    braid_blob.get(a, a_ops)
+
+                    // Remote -> local: subscribe to remote updates
+                    var b_ops = {
+                        dont_retry: true,
+                        subscribe: async update => {
+                            await braid_blob.put(a, update.body, {
+                                version: update.version,
+                                content_type: update.headers?.['content-type']
+                            })
+                        },
+                    }
+                    // Use fork-point (parents) to avoid receiving data we already have
+                    if (local_version) {
+                        b_ops.parents = local_version
+                    }
+                    // NOTE: this should not return, but it might throw
+                    await braid_blob.get(b, b_ops)
+                } catch (e) {
+                    if (closed) {
+                        return
+                    }
+
+                    disconnect()
+                    console.log(`disconnected, retrying in 1 second`)
+                    setTimeout(connect, 1000)
+                }
+            }
+            connect()
+        }
     }
 
     function compare_events(a, b) {
