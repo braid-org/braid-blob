@@ -688,6 +688,43 @@ runTest(
     'false'
 )
 
+runTest(
+    "test that meta filenames distinguish between 'a' and 'A' on case-insensitive filesystems",
+    async () => {
+        var suffix = Math.random().toString(36).slice(2)
+        var key1 = 'test-' + suffix + '-a'
+        var key2 = 'test-' + suffix + '-A'
+
+        // PUT to lowercase key with version 100
+        var r = await braid_fetch(`/${key1}`, {
+            method: 'PUT',
+            version: ['100'],
+            body: 'lowercase content'
+        })
+        if (!r.ok) throw 'PUT to lowercase key failed: ' + r.status
+
+        // PUT to uppercase key with version 200
+        var r = await braid_fetch(`/${key2}`, {
+            method: 'PUT',
+            version: ['200'],
+            body: 'uppercase content'
+        })
+        if (!r.ok) throw 'PUT to uppercase key failed: ' + r.status
+
+        // GET both and verify they have different versions (stored in meta files)
+        var r1 = await braid_fetch(`/${key1}`)
+        if (!r1.ok) throw 'GET lowercase key failed: ' + r1.status
+        var version1 = r1.headers.get('version')
+
+        var r2 = await braid_fetch(`/${key2}`)
+        if (!r2.ok) throw 'GET uppercase key failed: ' + r2.status
+        var version2 = r2.headers.get('version')
+
+        return version1 + '|' + version2
+    },
+    '"100"|"200"'
+)
+
 }
 
 // Export for Node.js (CommonJS)

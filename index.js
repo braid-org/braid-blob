@@ -1,4 +1,4 @@
-var {http_server: braidify, free_cors} = require('braid-http'),
+var {http_server: braidify} = require('braid-http'),
     {url_file_db} = require('url-file-db'),
     fs = require('fs'),
     path = require('path')
@@ -10,7 +10,8 @@ function create_braid_blob() {
         cache: {},
         key_to_subs: {},
         peer: null, // we'll try to load this from a file, if not set by the user
-        db: null // url-file-db instance
+        db: null, // url-file-db instance for blob storage
+        meta_db: null // url-file-db instance for meta storage
     }
 
     braid_blob.init = async () => {
@@ -27,10 +28,11 @@ function create_braid_blob() {
                 await braid_blob.put(key, body, { skip_write: true })
             })
 
-            // Create meta folder
-            await fs.promises.mkdir(braid_blob.meta_folder, { recursive: true })
+            // Create url-file-db instance for meta storage (in a subfolder)
+            // This will create both meta_folder and the db subfolder with recursive: true
+            braid_blob.meta_db = await url_file_db.create(`${braid_blob.meta_folder}/db`)
 
-            // establish a peer id
+            // establish a peer id (stored at root of meta_folder, sibling to db subfolder)
             if (!braid_blob.peer)
                 try {
                     braid_blob.peer = await fs.promises.readFile(`${braid_blob.meta_folder}/peer.txt`, 'utf8')
@@ -44,12 +46,11 @@ function create_braid_blob() {
     braid_blob.put = async (key, body, options = {}) => {
         await braid_blob.init()
 
-        // Read the meta file
-        const metaname = `${braid_blob.meta_folder}/${encode_filename(key)}`
+        // Read the meta data from meta_db
         var meta = {}
-        try {
-            meta = JSON.parse(await fs.promises.readFile(metaname, 'utf8'))
-        } catch (e) {}
+        var meta_content = await braid_blob.meta_db.read(key)
+        if (meta_content)
+            meta = JSON.parse(meta_content.toString('utf8'))
 
         var their_e =
             !options.version ?
@@ -69,11 +70,11 @@ function create_braid_blob() {
             if (!options.skip_write)
                 await braid_blob.db.write(key, body)
 
-            // Write the meta file
+            // Write the meta data
             if (options.content_type)
                 meta.content_type = options.content_type
 
-            await fs.promises.writeFile(metaname, JSON.stringify(meta))
+            await braid_blob.meta_db.write(key, JSON.stringify(meta))
 
             // Notify all subscriptions of the update
             // (except the peer which made the PUT request itself)
@@ -93,12 +94,11 @@ function create_braid_blob() {
     braid_blob.get = async (key, options = {}) => {
         await braid_blob.init()
 
-        // Read the meta file
-        const metaname = `${braid_blob.meta_folder}/${encode_filename(key)}`
+        // Read the meta data from meta_db
         var meta = {}
-        try {
-            meta = JSON.parse(await fs.promises.readFile(metaname, 'utf8'))
-        } catch (e) {}
+        var meta_content = await braid_blob.meta_db.read(key)
+        if (meta_content)
+            meta = JSON.parse(meta_content.toString('utf8'))
         if (meta.event == null) return null
 
         var result = {
@@ -171,13 +171,11 @@ function create_braid_blob() {
         var body = req.method === 'PUT' && await slurp(req)
 
         await within_fiber(options.key, async () => {
-            const metaname = `${braid_blob.meta_folder}/${encode_filename(options.key)}`
-
-            // Read the meta file
+            // Read the meta data from meta_db
             var meta = {}
-            try {
-                meta = JSON.parse(await fs.promises.readFile(metaname, 'utf8'))
-            } catch (e) {}
+            var meta_content = await braid_blob.meta_db.read(options.key)
+            if (meta_content)
+                meta = JSON.parse(meta_content.toString('utf8'))
 
             if (req.method === 'GET') {
                 if (!res.hasHeader("editable")) res.setHeader("Editable", "true")
@@ -234,12 +232,8 @@ function create_braid_blob() {
                 res.setHeader("Version", version_to_header(meta.event != null ? [meta.event] : []))
                 res.end('')
             } else if (req.method === 'DELETE') {
-                try {
-                    await braid_blob.db.delete(options.key)
-                } catch (e) {}
-                try {
-                    await fs.promises.unlink(metaname)
-                } catch (e) {}
+                await braid_blob.db.delete(options.key)
+                await braid_blob.meta_db.delete(options.key)
                 res.statusCode = 204 // No Content
                 res.end('')
             }
@@ -273,16 +267,6 @@ function create_braid_blob() {
         // Convert version array to header format: JSON without outer brackets
         if (!version || !version.length) return ''
         return ascii_ify(version.map(v => JSON.stringify(v)).join(', '))
-    }
-
-    function encode_filename(filename) {
-        // Swap all "!" and "/" characters
-        let swapped = filename.replace(/[!/]/g, (match) => (match === "!" ? "/" : "!"))
-
-        // Encode the filename using encodeURIComponent()
-        let encoded = encodeURIComponent(swapped)
-
-        return encoded
     }
 
     function within_fiber(id, func) {
