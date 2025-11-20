@@ -223,7 +223,10 @@ function create_braid_blob() {
     braid_blob.serve = async (req, res, options = {}) => {
         await braid_blob.init()
 
-        if (!options.key) options.key = url_file_db.get_key(req.url)
+        if (!options.key) {
+            var url = new URL(req.url, 'http://localhost')
+            options.key = url_file_db.get_canonical_path(url.pathname)
+        }
 
         braidify(req, res)
         if (res.is_multiplexer) return
