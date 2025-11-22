@@ -1,6 +1,5 @@
 var {http_server: braidify, fetch: braid_fetch} = require('braid-http'),
     {url_file_db} = require('url-file-db'),
-    fs = require('fs'),
     path = require('path')
 
 function create_braid_blob() {
@@ -9,9 +8,8 @@ function create_braid_blob() {
         meta_folder: './braid-blob-meta',
         cache: {},
         key_to_subs: {},
-        peer: null, // we'll try to load this from a file, if not set by the user
-        db: null, // url-file-db instance for blob storage
-        meta_db: null // url-file-db instance for meta storage
+        peer: null, // will be auto-generated if not set by the user
+        db: null // url-file-db instance with integrated meta storage
     }
 
     braid_blob.init = async () => {
@@ -21,25 +19,20 @@ function create_braid_blob() {
         await braid_blob.init()
 
         async function real_init() {
-            // Create url-file-db instance for blob storage
-            braid_blob.db = await url_file_db.create(braid_blob.db_folder, async (key) => {
-                // File changed externally, notify subscriptions
-                var body = await braid_blob.db.read(key)
-                await braid_blob.put(key, body, { skip_write: true })
-            })
+            // Create url-file-db instance with integrated meta storage
+            braid_blob.db = await url_file_db.create(
+                braid_blob.db_folder,
+                braid_blob.meta_folder,
+                async (key) => {
+                    // File changed externally, notify subscriptions
+                    var body = await braid_blob.db.read(key)
+                    await braid_blob.put(key, body, { skip_write: true })
+                }
+            )
 
-            // Create url-file-db instance for meta storage (in a subfolder)
-            // This will create both meta_folder and the db subfolder with recursive: true
-            braid_blob.meta_db = await url_file_db.create(`${braid_blob.meta_folder}/db`)
-
-            // establish a peer id (stored at root of meta_folder, sibling to db subfolder)
-            if (!braid_blob.peer)
-                try {
-                    braid_blob.peer = await fs.promises.readFile(`${braid_blob.meta_folder}/peer.txt`, 'utf8')
-                } catch (e) {}
+            // establish a peer id if not already set
             if (!braid_blob.peer)
                 braid_blob.peer = Math.random().toString(36).slice(2)
-            await fs.promises.writeFile(`${braid_blob.meta_folder}/peer.txt`, braid_blob.peer)
         }
     }
 
@@ -69,11 +62,8 @@ function create_braid_blob() {
 
         await braid_blob.init()
 
-        // Read the meta data from meta_db
-        var meta = {}
-        var meta_content = await braid_blob.meta_db.read(key)
-        if (meta_content)
-            meta = JSON.parse(meta_content.toString('utf8'))
+        // Read the meta data using new meta API
+        var meta = braid_blob.db.get_meta(key) || {}
 
         var their_e =
             !options.version ?
@@ -93,11 +83,12 @@ function create_braid_blob() {
             if (!options.skip_write)
                 await braid_blob.db.write(key, body)
 
-            // Write the meta data
+            // Update only the fields we want to change in metadata
+            var meta_updates = { event: their_e }
             if (options.content_type)
-                meta.content_type = options.content_type
+                meta_updates.content_type = options.content_type
 
-            await braid_blob.meta_db.write(key, JSON.stringify(meta))
+            await braid_blob.db.update_meta(key, meta_updates)
 
             // Notify all subscriptions of the update
             // (except the peer which made the PUT request itself)
@@ -153,11 +144,8 @@ function create_braid_blob() {
 
         await braid_blob.init()
 
-        // Read the meta data from meta_db
-        var meta = {}
-        var meta_content = await braid_blob.meta_db.read(key)
-        if (meta_content)
-            meta = JSON.parse(meta_content.toString('utf8'))
+        // Read the meta data using new meta API
+        var meta = braid_blob.db.get_meta(key) || {}
         if (meta.event == null) return null
 
         var result = {
@@ -238,12 +226,6 @@ function create_braid_blob() {
         var body = req.method === 'PUT' && await slurp(req)
 
         await within_fiber(options.key, async () => {
-            // Read the meta data from meta_db
-            var meta = {}
-            var meta_content = await braid_blob.meta_db.read(options.key)
-            if (meta_content)
-                meta = JSON.parse(meta_content.toString('utf8'))
-
             if (req.method === 'GET' || req.method === 'HEAD') {
                 if (!res.hasHeader("editable")) res.setHeader("Editable", "true")
                 if (!req.subscribe) res.setHeader("Accept-Subscribe", "true")
@@ -301,16 +283,15 @@ function create_braid_blob() {
                 }
             } else if (req.method === 'PUT') {
                 // Handle PUT request to update binary files
-                meta.event = await braid_blob.put(options.key, body, {
+                var event = await braid_blob.put(options.key, body, {
                     version: req.version,
                     content_type: req.headers['content-type'],
                     peer: req.peer
                 })
-                res.setHeader("Version", version_to_header(meta.event != null ? [meta.event] : []))
+                res.setHeader("Version", version_to_header(event != null ? [event] : []))
                 res.end('')
             } else if (req.method === 'DELETE') {
                 await braid_blob.db.delete(options.key)
-                await braid_blob.meta_db.delete(options.key)
                 res.statusCode = 204 // No Content
                 res.end('')
             }

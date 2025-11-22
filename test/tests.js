@@ -34,7 +34,7 @@ runTest(
 )
 
 runTest(
-    "test that peer is same the second time we run from same db folder",
+    "test that peer is different each time we create a new instance",
     async () => {
         var r1 = await braid_fetch(`/eval`, {
             method: 'POST',
@@ -62,7 +62,7 @@ runTest(
                 await require('fs').promises.rm(db, { recursive: true, force: true })
                 await require('fs').promises.rm(meta, { recursive: true, force: true })
 
-                res.end('' + (bb1.peer === bb2.peer))
+                res.end('' + (bb1.peer !== bb2.peer))
             })()`
         })
         return await r1.text()
@@ -98,6 +98,39 @@ runTest(
         return await r1.text()
     },
     'test_peer'
+)
+
+runTest(
+    "test that manually set peer persists through initialization",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
+                var db = __dirname + '/' + test_id + '-db'
+                var meta = __dirname + '/' + test_id + '-meta'
+
+                // Create instance with manually set peer
+                var bb1 = braid_blob.create_braid_blob()
+                bb1.db_folder = db
+                bb1.meta_folder = meta
+                bb1.peer = 'custom-peer-id-123'
+
+                // Initialize (should keep our custom peer)
+                await bb1.init()
+
+                var peer_after_init = bb1.peer
+
+                // Clean up
+                await require('fs').promises.rm(db, { recursive: true, force: true })
+                await require('fs').promises.rm(meta, { recursive: true, force: true })
+
+                res.end(peer_after_init === 'custom-peer-id-123' ? 'true' : 'false: ' + peer_after_init)
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
 )
 
 runTest(
@@ -1140,6 +1173,140 @@ runTest(
         return r.status
     },
     '309'
+)
+
+runTest(
+    "test multiple writes preserve correct mtime across restarts",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-multi-write-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+                var test_key = 'test-file'
+
+                try {
+                    // Create first braid_blob instance
+                    var bb1 = braid_blob.create_braid_blob()
+                    bb1.db_folder = db_folder
+                    bb1.meta_folder = meta_folder
+
+                    // First write
+                    await bb1.put(test_key, Buffer.from('content1'), {
+                        version: ['version-1']
+                    })
+
+                    // Wait a bit to ensure different mtime
+                    await new Promise(resolve => setTimeout(resolve, 50))
+
+                    // Second write to same file (this is where the bug would occur)
+                    await bb1.put(test_key, Buffer.from('content2'), {
+                        version: ['version-2']
+                    })
+
+                    var result1 = await bb1.get(test_key)
+
+                    // Now restart and check
+                    var bb2 = braid_blob.create_braid_blob()
+                    bb2.db_folder = db_folder
+                    bb2.meta_folder = meta_folder
+
+                    // This should NOT trigger a file change callback
+                    var result2 = await bb2.get(test_key)
+
+                    // Version should still be version-2, not regenerated
+                    var correct_version = (result2.version[0] === 'version-2')
+                    var content_correct = (result2.body.toString() === 'content2')
+
+                    // Clean up
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+
+                    res.end(correct_version && content_correct ? 'true' :
+                            'false: version=' + result2.version[0] + ', content=' + result2.body.toString())
+                } catch (e) {
+                    // Clean up even on error
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test that files keep same event ID across restarts when not edited",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-persist-event-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+                var test_key = 'test-file'
+                var test_content = 'test content that should not change'
+
+                try {
+                    // Create first braid_blob instance
+                    var bb1 = braid_blob.create_braid_blob()
+                    bb1.db_folder = db_folder
+                    bb1.meta_folder = meta_folder
+
+                    // Put a file with specific version
+                    var version1 = await bb1.put(test_key, Buffer.from(test_content), {
+                        version: ['test-peer-123456']
+                    })
+
+                    // Get the file to verify it has the expected version
+                    var result1 = await bb1.get(test_key)
+
+                    // Check what metadata was saved
+                    var meta1 = bb1.db.get_meta(test_key)
+                    var debug_info = 'meta1: ' + JSON.stringify(meta1) + '; '
+
+                    // Wait a bit to ensure file system has settled
+                    await new Promise(resolve => setTimeout(resolve, 100))
+
+                    // Now create a second braid_blob instance with the same folders
+                    // This simulates a restart
+                    var bb2 = braid_blob.create_braid_blob()
+                    bb2.db_folder = db_folder
+                    bb2.meta_folder = meta_folder
+
+                    // Initialize bb2 by doing a get (this triggers init)
+                    var result2 = await bb2.get(test_key)
+
+                    // Check what metadata bb2 sees
+                    var meta2 = bb2.db.get_meta(test_key)
+                    debug_info += 'meta2: ' + JSON.stringify(meta2) + '; '
+
+                    // The version should be the same - no new event ID generated
+                    var versions_match = (result1.version[0] === result2.version[0])
+                    var both_have_expected = (result1.version[0] === 'test-peer-123456')
+
+                    // Clean up
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+
+                    res.end(versions_match && both_have_expected ? 'true' :
+                            'false: v1=' + result1.version[0] + ', v2=' + result2.version[0] + ' | ' + debug_info)
+                } catch (e) {
+                    // Clean up even on error
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
 )
 
 }

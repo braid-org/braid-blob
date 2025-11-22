@@ -184,6 +184,28 @@ async function runConsoleTests() {
     console.log(`Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`)
     console.log('='.repeat(50))
 
+    // Clean up test directories
+    console.log('Cleaning up test directories...')
+    const fs = require('fs').promises
+    const path = require('path')
+
+    try {
+        // Clean up main test folders
+        await fs.rm(path.join(__dirname, 'test_db_folder'), { recursive: true, force: true })
+        await fs.rm(path.join(__dirname, 'test_meta_folder'), { recursive: true, force: true })
+
+        // Clean up any leftover test-* directories
+        const entries = await fs.readdir(__dirname)
+        for (const entry of entries) {
+            if ((entry.startsWith('test-') && entry.includes('-db')) ||
+                (entry.startsWith('test-') && entry.includes('-meta'))) {
+                await fs.rm(path.join(__dirname, entry), { recursive: true, force: true })
+            }
+        }
+    } catch (e) {
+        // Ignore cleanup errors
+    }
+
     // Force close the server and all connections
     console.log('Closing server...')
     testServer.server.close(() => {
