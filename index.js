@@ -23,9 +23,10 @@ function create_braid_blob() {
             braid_blob.db = await url_file_db.create(
                 braid_blob.db_folder,
                 braid_blob.meta_folder,
-                async (key) => {
+                async (db, key) => {
                     // File changed externally, notify subscriptions
-                    var body = await braid_blob.db.read(key)
+                    // Use db parameter instead of braid_blob.db to avoid race condition
+                    var body = await db.read(key)
                     await braid_blob.put(key, body, { skip_write: true })
                 }
             )
