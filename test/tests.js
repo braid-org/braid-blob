@@ -382,6 +382,102 @@ runTest(
 )
 
 runTest(
+    "test braid_blob.delete() directly",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                var bb = braid_blob.create_braid_blob()
+                bb.db_folder = db_folder
+                bb.meta_folder = meta_folder
+
+                try {
+                    // Put a file
+                    await bb.put('/test-file', Buffer.from('hello'))
+
+                    // Verify it exists
+                    var result = await bb.get('/test-file')
+                    if (!result || !result.body) {
+                        res.end('error: file not found after put')
+                        return
+                    }
+
+                    // Delete it
+                    await bb.delete('/test-file')
+
+                    // Verify it's gone
+                    var result2 = await bb.get('/test-file')
+                    if (result2) {
+                        res.end('error: file still exists after delete')
+                        return
+                    }
+
+                    res.end('true')
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await require('fs').promises.rm(db_folder, { recursive: true, force: true })
+                    await require('fs').promises.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test braid_blob.delete() cleans up subscriptions",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                var bb = braid_blob.create_braid_blob()
+                bb.db_folder = db_folder
+                bb.meta_folder = meta_folder
+
+                try {
+                    // Put a file
+                    await bb.put('/test-file', Buffer.from('hello'))
+
+                    // Subscribe to it
+                    var got_update = false
+                    await bb.get('/test-file', {
+                        subscribe: (update) => { got_update = true }
+                    })
+
+                    // Verify subscription exists
+                    var has_sub_before = !!bb.key_to_subs['/test-file']
+
+                    // Delete it
+                    await bb.delete('/test-file')
+
+                    // Verify subscription is cleaned up
+                    var has_sub_after = !!bb.key_to_subs['/test-file']
+
+                    res.end('' + (has_sub_before && !has_sub_after))
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await require('fs').promises.rm(db_folder, { recursive: true, force: true })
+                    await require('fs').promises.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
     "test that subscribe returns current-version header",
     async () => {
         var key = 'test-' + Math.random().toString(36).slice(2)

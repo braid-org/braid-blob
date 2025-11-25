@@ -209,6 +209,36 @@ function create_braid_blob() {
         return result
     }
 
+    braid_blob.delete = async (key, options = {}) => {
+        // Handle URL case - make a remote DELETE request
+        if (key instanceof URL) {
+            options.my_abort = new AbortController()
+            if (options.signal) {
+                options.signal.addEventListener('abort', () =>
+                    options.my_abort.abort())
+            }
+
+            var params = {
+                method: 'DELETE',
+                signal: options.my_abort.signal
+            }
+            for (var x of ['headers', 'peer'])
+                if (options[x] != null) params[x] = options[x]
+
+            return await braid_fetch(key.href, params)
+        }
+
+        await braid_blob.init()
+
+        // Delete the file from the database
+        await braid_blob.db.delete(key)
+
+        // TODO: notify subscribers of deletion once we have a protocol for that
+        // For now, just clean up the subscriptions
+        if (braid_blob.key_to_subs[key])
+            delete braid_blob.key_to_subs[key]
+    }
+
     braid_blob.serve = async (req, res, options = {}) => {
         await braid_blob.init()
 
@@ -292,7 +322,7 @@ function create_braid_blob() {
                 res.setHeader("Version", version_to_header(event != null ? [event] : []))
                 res.end('')
             } else if (req.method === 'DELETE') {
-                await braid_blob.db.delete(options.key)
+                await braid_blob.delete(options.key)
                 res.statusCode = 204 // No Content
                 res.end('')
             }
