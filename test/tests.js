@@ -1162,12 +1162,14 @@ runTest(
                     // Use an invalid/unreachable URL to trigger an error
                     var remote_url = new URL('http://localhost:9999/${remote_key}')
 
-                    // Start sync
-                    var sync_options = {}
-                    braid_blob.sync('${local_key}', remote_url, sync_options)
+                    // Create an AbortController to stop the sync
+                    var ac = new AbortController()
+
+                    // Start sync with signal
+                    braid_blob.sync('${local_key}', remote_url, { signal: ac.signal })
 
                     // Close the sync immediately to trigger the closed path when error occurs
-                    sync_options.my_unsync()
+                    ac.abort()
 
                     res.end('sync started and closed')
                 } catch (e) {
@@ -1201,15 +1203,17 @@ runTest(
                     // Use an invalid/unreachable URL to trigger an error
                     var remote_url = new URL('http://localhost:9999/${remote_key}')
 
-                    // Start sync without closing it - should trigger retry
-                    var sync_options = {}
-                    braid_blob.sync('${local_key}', remote_url, sync_options)
+                    // Create an AbortController to stop the sync
+                    var ac = new AbortController()
+
+                    // Start sync with signal - should trigger retry on error
+                    braid_blob.sync('${local_key}', remote_url, { signal: ac.signal })
 
                     // Wait a bit for the error to occur and retry message to print
                     await new Promise(done => setTimeout(done, 200))
 
                     // Now close it to stop retrying
-                    sync_options.my_unsync()
+                    ac.abort()
 
                     res.end('sync error occurred')
                 } catch (e) {
@@ -1492,6 +1496,213 @@ runTest(
         return await r1.text()
     },
     'true'
+)
+
+runTest(
+    "test get with URL returns null on 404",
+    async () => {
+        var key = 'test-url-get-404-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var braid_blob = require(\`\${__dirname}/../index.js\`)
+                var url = new URL('http://localhost:' + req.socket.localPort + '/${key}')
+                var result = await braid_blob.get(url)
+                res.end(result === null ? 'null' : 'not null: ' + JSON.stringify(result))
+            })()`
+        })
+
+        return await r1.text()
+    },
+    'null'
+)
+
+runTest(
+    "test signal abort stops local put operation",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-abort-put-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Create an already-aborted signal
+                    var ac = new AbortController()
+                    ac.abort()
+
+                    // Try to put with aborted signal
+                    var result = await bb.put('/test-file', Buffer.from('hello'), {
+                        signal: ac.signal
+                    })
+
+                    // Result should be undefined since operation was aborted
+                    res.end(result === undefined ? 'aborted' : 'not aborted: ' + result)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'aborted'
+)
+
+runTest(
+    "test signal abort stops local get operation",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-abort-get-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Put a file first
+                    await bb.put('/test-file', Buffer.from('hello'), { version: ['1'] })
+
+                    // Create an already-aborted signal
+                    var ac = new AbortController()
+                    ac.abort()
+
+                    // Try to get with aborted signal (after header_cb)
+                    var header_called = false
+                    var result = await bb.get('/test-file', {
+                        signal: ac.signal,
+                        header_cb: () => { header_called = true }
+                    })
+
+                    // Result should be undefined since operation was aborted after header_cb
+                    res.end(header_called && result === undefined ? 'aborted' : 'not aborted: header=' + header_called + ' result=' + JSON.stringify(result))
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'aborted'
+)
+
+runTest(
+    "test signal abort stops local delete operation",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-abort-delete-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Put a file first
+                    await bb.put('/test-file', Buffer.from('hello'), { version: ['1'] })
+
+                    // Create an already-aborted signal
+                    var ac = new AbortController()
+                    ac.abort()
+
+                    // Try to delete with aborted signal
+                    await bb.delete('/test-file', { signal: ac.signal })
+
+                    // File should still exist since delete was aborted
+                    var result = await bb.get('/test-file')
+                    res.end(result && result.body ? 'still exists' : 'deleted')
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'still exists'
+)
+
+runTest(
+    "test signal abort stops subscription updates",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-abort-sub-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Put a file first
+                    await bb.put('/test-file', Buffer.from('v1'), { version: ['1'] })
+
+                    // Subscribe with an AbortController
+                    var ac = new AbortController()
+                    var updates = []
+
+                    await bb.get('/test-file', {
+                        signal: ac.signal,
+                        subscribe: (update) => {
+                            updates.push(update.body.toString())
+                        }
+                    })
+
+                    // Should have received initial update
+                    if (updates.length !== 1 || updates[0] !== 'v1') {
+                        res.end('initial update wrong: ' + JSON.stringify(updates))
+                        return
+                    }
+
+                    // Abort the subscription
+                    ac.abort()
+
+                    // Put another update
+                    await bb.put('/test-file', Buffer.from('v2'), { version: ['2'] })
+
+                    // Wait a bit for any updates to propagate
+                    await new Promise(done => setTimeout(done, 50))
+
+                    // Should still only have the initial update
+                    res.end(updates.length === 1 ? 'stopped' : 'got extra: ' + JSON.stringify(updates))
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'stopped'
 )
 
 }

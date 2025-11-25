@@ -40,15 +40,10 @@ function create_braid_blob() {
     braid_blob.put = async (key, body, options = {}) => {
         // Handle URL case - make a remote PUT request
         if (key instanceof URL) {
-            options.my_abort = new AbortController()
-            if (options.signal) {
-                options.signal.addEventListener('abort', () =>
-                    options.my_abort.abort())
-            }
 
             var params = {
                 method: 'PUT',
-                signal: options.my_abort.signal,
+                signal: options.signal,
                 retry: () => true,
                 body: body
             }
@@ -62,6 +57,7 @@ function create_braid_blob() {
         }
 
         await braid_blob.init()
+        if (options.signal?.aborted) return
 
         // Read the meta data using new meta API
         var meta = braid_blob.db.get_meta(key) || {}
@@ -83,6 +79,7 @@ function create_braid_blob() {
             // Write the file using url-file-db (unless skip_write is set)
             if (!options.skip_write)
                 await braid_blob.db.write(key, body)
+            if (options.signal?.aborted) return
 
             // Update only the fields we want to change in metadata
             var meta_updates = { event: their_e }
@@ -90,6 +87,7 @@ function create_braid_blob() {
                 meta_updates.content_type = options.content_type
 
             await braid_blob.db.update_meta(key, meta_updates)
+            if (options.signal?.aborted) return
 
             // Notify all subscriptions of the update
             // (except the peer which made the PUT request itself)
@@ -109,20 +107,20 @@ function create_braid_blob() {
     braid_blob.get = async (key, options = {}) => {
         // Handle URL case - make a remote GET request
         if (key instanceof URL) {
-            options.my_abort = new AbortController()
-
             var params = {
-                signal: options.my_abort.signal,
+                signal: options.signal,
                 subscribe: !!options.subscribe,
                 heartbeats: 120,
             }
             if (!options.dont_retry) {
-                params.retry = () => true
+                params.retry = (res) => res.status !== 404
             }
             for (var x of ['headers', 'parents', 'version', 'peer'])
                 if (options[x] != null) params[x] = options[x]
 
             var res = await braid_fetch(key.href, params)
+
+            if (res.status === 404) return null
 
             if (options.subscribe) {
                 if (options.dont_retry) {
@@ -154,6 +152,7 @@ function create_braid_blob() {
             content_type: meta.content_type
         }
         if (options.header_cb) await options.header_cb(result)
+        if (options.signal?.aborted) return
         // Check if requested version/parents is newer than what we have - if so, we don't have it
         if (options.version && options.version.length && compare_events(options.version[0], meta.event) > 0)
             throw new Error('unkown version: ' + options.version)
@@ -164,7 +163,8 @@ function create_braid_blob() {
         if (options.subscribe) {
             var subscribe_chain = Promise.resolve()
             options.my_subscribe = (x) => subscribe_chain =
-                subscribe_chain.then(() => options.subscribe(x))
+                subscribe_chain.then(() =>
+                    !options.signal?.aborted && options.subscribe(x))
 
             // Start a subscription for future updates
             if (!braid_blob.key_to_subs[key])
@@ -181,14 +181,14 @@ function create_braid_blob() {
                 }
             })
 
-            // Store unsubscribe function
-            result.unsubscribe = () => {
+            options.signal?.addEventListener('abort', () => {
                 braid_blob.key_to_subs[key].delete(peer)
                 if (!braid_blob.key_to_subs[key].size)
                     delete braid_blob.key_to_subs[key]
-            }
+            })
 
             if (options.before_send_cb) await options.before_send_cb(result)
+            if (options.signal?.aborted) return
 
             // Send an immediate update if needed
             if (!options.parents ||
@@ -212,15 +212,10 @@ function create_braid_blob() {
     braid_blob.delete = async (key, options = {}) => {
         // Handle URL case - make a remote DELETE request
         if (key instanceof URL) {
-            options.my_abort = new AbortController()
-            if (options.signal) {
-                options.signal.addEventListener('abort', () =>
-                    options.my_abort.abort())
-            }
 
             var params = {
                 method: 'DELETE',
-                signal: options.my_abort.signal
+                signal: options.signal
             }
             for (var x of ['headers', 'peer'])
                 if (options[x] != null) params[x] = options[x]
@@ -229,6 +224,7 @@ function create_braid_blob() {
         }
 
         await braid_blob.init()
+        if (options.signal?.aborted) return
 
         // Delete the file from the database
         await braid_blob.db.delete(key)
@@ -329,27 +325,40 @@ function create_braid_blob() {
         })
     }
 
-    braid_blob.sync = async (a, b, options = {}) => {
-        var unsync_cbs = []
-        options.my_unsync = () => unsync_cbs.forEach(cb => cb())
-
+    braid_blob.sync = (a, b, options = {}) => {
         if ((a instanceof URL) === (b instanceof URL)) {
             // Both are URLs or both are local keys
+            var a_first_put, b_first_put
+            var a_first_put_promise = new Promise(done => a_first_put = done)
+            var b_first_put_promise = new Promise(done => b_first_put = done)
+
             var a_ops = {
-                subscribe: update => braid_blob.put(b, update.body, {
-                    version: update.version,
-                    content_type: update.headers?.['content-type']
-                })
+                signal: options.signal,
+                subscribe: update => {
+                    braid_blob.put(b, update.body, {
+                        signal: options.signal,
+                        version: update.version,
+                        content_type: update.headers?.['content-type']
+                    }).then(a_first_put)
+                }
             }
-            braid_blob.get(a, a_ops)
+            braid_blob.get(a, a_ops).then(x =>
+                x || b_first_put_promise.then(() =>
+                    braid_blob.get(a, a_ops)))
 
             var b_ops = {
-                subscribe: update => braid_blob.put(a, update.body, {
-                    version: update.version,
-                    content_type: update.headers?.['content-type']
-                })
+                signal: options.signal,
+                subscribe: update => {
+                    braid_blob.put(a, update.body, {
+                        signal: options.signal,
+                        version: update.version,
+                        content_type: update.headers?.['content-type']
+                    }).then(b_first_put)
+                }
             }
-            braid_blob.get(b, b_ops)
+            braid_blob.get(b, b_ops).then(x =>
+                x || a_first_put_promise.then(() =>
+                    braid_blob.get(b, b_ops)))
         } else {
             // One is local, one is remote - make a=local and b=remote (swap if not)
             if (a instanceof URL) {
@@ -357,17 +366,23 @@ function create_braid_blob() {
             }
 
             var closed = false
-            options.my_unsync = () => { closed = true; disconnect() }
-
             var disconnect = () => { }
+            options.signal?.addEventListener('abort', () =>
+                { closed = true; disconnect() })
+
+            var local_first_put, remote_first_put
+            var local_first_put_promise = new Promise(done => local_first_put = done)
+            var remote_first_put_promise = new Promise(done => remote_first_put = done)
+
             async function connect() {
                 var ac = new AbortController()
-                var disconnect_cbs = [() => ac.abort()]
-                disconnect = () => disconnect_cbs.forEach(cb => cb())
+                disconnect = () => ac.abort()
 
                 try {
                     // Check if remote has our current version (simple fork-point check)
-                    var local_result = await braid_blob.get(a)
+                    var local_result = await braid_blob.get(a, {
+                        signal: ac.signal
+                    })
                     var local_version = local_result ? local_result.version : null
                     var server_has_our_version = false
 
@@ -383,12 +398,13 @@ function create_braid_blob() {
 
                     // Local -> remote: subscribe to future local changes
                     var a_ops = {
+                        signal: ac.signal,
                         subscribe: update => {
-                            update.signal = ac.signal
                             braid_blob.put(b, update.body, {
+                                signal: ac.signal,
                                 version: update.version,
                                 content_type: update.content_type
-                            }).catch(e => {
+                            }).then(local_first_put).catch(e => {
                                 if (e.name === 'AbortError') {
                                     // ignore
                                 } else throw e
@@ -400,24 +416,36 @@ function create_braid_blob() {
                     if (server_has_our_version) {
                         a_ops.parents = local_version
                     }
-                    braid_blob.get(a, a_ops)
 
                     // Remote -> local: subscribe to remote updates
                     var b_ops = {
+                        signal: ac.signal,
                         dont_retry: true,
                         subscribe: async update => {
                             await braid_blob.put(a, update.body, {
                                 version: update.version,
                                 content_type: update.headers?.['content-type']
                             })
+                            remote_first_put()
                         },
                     }
                     // Use fork-point (parents) to avoid receiving data we already have
                     if (local_version) {
                         b_ops.parents = local_version
                     }
+
+                    // Set up both subscriptions, handling cases where one doesn't exist yet
+                    braid_blob.get(a, a_ops).then(x =>
+                        x || remote_first_put_promise.then(() =>
+                            braid_blob.get(a, a_ops)))
+
                     // NOTE: this should not return, but it might throw
                     await braid_blob.get(b, b_ops)
+
+                    // this will only return if it couldn't find the key
+                    await local_first_put_promise
+                    disconnect()
+                    connect()
                 } catch (e) {
                     if (closed) {
                         return
