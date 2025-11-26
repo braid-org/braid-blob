@@ -1148,6 +1148,153 @@ runTest(
 )
 
 runTest(
+    "test sync readonly remote to nonexistent local",
+    async () => {
+        var local_key = 'test-sync-readonly-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-readonly-remote-' + Math.random().toString(36).slice(2)
+
+        // Put something on the server first with Editable: false
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    // Create a custom handler that sets Editable: false
+                    req.method = 'PUT'
+                    req.version = ['100']
+                    req.body = Buffer.from('readonly content')
+                    await braid_blob.put('${remote_key}', req.body, { version: req.version })
+                    res.end('created')
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        var result = await r1.text()
+        if (result.startsWith('error:')) return result
+
+        // Now sync to a local key that doesn't exist, with a readonly remote
+        var r2 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var fs = require('fs').promises
+                    var test_id = 'test-sync-readonly-' + Math.random().toString(36).slice(2)
+                    var db_folder = __dirname + '/' + test_id + '-db'
+                    var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Create a mock server URL that returns Editable: false
+                    var http = require('http')
+                    var {http_server: braidify} = require('braid-http')
+
+                    var mock_server = http.createServer((req2, res2) => {
+                        braidify(req2, res2)
+                        res2.setHeader('Editable', 'false')
+                        braid_blob.serve(req2, res2, { key: '${remote_key}' })
+                    })
+
+                    await new Promise(resolve => mock_server.listen(0, resolve))
+                    var port = mock_server.address().port
+
+                    var remote_url = new URL('http://localhost:' + port + '/${remote_key}')
+                    var ac = new AbortController()
+
+                    // Start sync - local key doesn't exist yet
+                    bb.sync('${local_key}', remote_url, { signal: ac.signal })
+
+                    // Wait for sync to happen
+                    await new Promise(done => setTimeout(done, 500))
+
+                    // Stop sync
+                    ac.abort()
+                    mock_server.close()
+
+                    // Check if local file exists and has the content
+                    var result = await bb.get('${local_key}')
+
+                    var response
+                    if (!result) {
+                        response = 'file not created'
+                    } else if (result.body.toString() !== 'readonly content') {
+                        response = 'wrong content: ' + result.body.toString()
+                    } else {
+                        // Check if the file is actually read-only
+                        await bb.init()
+                        var is_readonly = await bb.db.is_read_only('${local_key}')
+                        response = is_readonly ? 'synced and readonly' : 'synced but NOT readonly'
+                    }
+
+                    // Clean up
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+
+                    res.end(response)
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        return await r2.text()
+    },
+    'synced and readonly'
+)
+
+runTest(
+    "test sync does not disconnect unnecessarily",
+    async () => {
+        var local_key = 'test-sync-no-disconnect-local-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-no-disconnect-remote-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Put something locally first
+                    await braid_blob.put('${local_key}', Buffer.from('local content'), { version: ['600'] })
+
+                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+
+                    // Capture console.log to count disconnects
+                    var disconnect_count = 0
+                    var original_log = console.log
+                    console.log = function(...args) {
+                        if (args[0]?.includes?.('disconnected')) disconnect_count++
+                        original_log.apply(console, args)
+                    }
+
+                    // Create an AbortController to stop the sync
+                    var ac = new AbortController()
+
+                    // Start sync
+                    braid_blob.sync('${local_key}', remote_url, { signal: ac.signal })
+
+                    // Wait for sync to establish and stabilize
+                    await new Promise(done => setTimeout(done, 500))
+
+                    // Stop sync
+                    ac.abort()
+
+                    // Restore console.log
+                    console.log = original_log
+
+                    // Should have zero disconnects during normal operation
+                    res.end(disconnect_count === 0 ? 'no disconnects' : 'disconnects: ' + disconnect_count)
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'no disconnects'
+)
+
+runTest(
     "test sync closed during error",
     async () => {
         var local_key = 'test-sync-closed-local-' + Math.random().toString(36).slice(2)

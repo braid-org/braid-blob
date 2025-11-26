@@ -123,18 +123,9 @@ function create_braid_blob() {
             if (res.status === 404) return null
 
             if (options.subscribe) {
-                if (options.dont_retry) {
-                    var error_happened
-                    var error_promise = new Promise((_, fail) => error_happened = fail)
-                }
-
                 res.subscribe(async update => {
                     await options.subscribe(update)
-                }, e => options.dont_retry && error_happened(e))
-
-                if (options.dont_retry) {
-                    return await error_promise
-                }
+                }, e => options.on_error?.(e))
                 return res
             } else {
                 return await res.arrayBuffer()
@@ -374,6 +365,13 @@ function create_braid_blob() {
             var local_first_put_promise = new Promise(done => local_first_put = done)
             var remote_first_put_promise = new Promise(done => remote_first_put = done)
 
+            function handle_error(e) {
+                if (closed) return
+                disconnect()
+                console.log(`disconnected, retrying in 1 second`)
+                setTimeout(connect, 1000)
+            }
+
             async function connect() {
                 var ac = new AbortController()
                 disconnect = () => ac.abort()
@@ -418,16 +416,28 @@ function create_braid_blob() {
                     }
 
                     // Remote -> local: subscribe to remote updates
+                    // We need both: remote_res (for Editable header) and local file exists
+                    var got_remote_res, got_local_file
+                    var remote_res_promise = new Promise(done => got_remote_res = done)
+                    var local_file_promise = new Promise(done => got_local_file = done)
+
+                    // Apply read-only once we have both remote response and local file
+                    Promise.all([remote_res_promise, local_file_promise]).then(async () => {
+                        var read_only = remote_res.headers?.get('editable') === 'false'
+                        await braid_blob.db.set_read_only(a, read_only)
+                    })
+
                     var b_ops = {
                         signal: ac.signal,
-                        dont_retry: true,
                         subscribe: async update => {
                             await braid_blob.put(a, update.body, {
                                 version: update.version,
                                 content_type: update.headers?.['content-type']
                             })
+                            got_local_file()
                             remote_first_put()
                         },
+                        on_error: handle_error
                     }
                     // Use fork-point (parents) to avoid receiving data we already have
                     if (local_version) {
@@ -435,25 +445,25 @@ function create_braid_blob() {
                     }
 
                     // Set up both subscriptions, handling cases where one doesn't exist yet
-                    braid_blob.get(a, a_ops).then(x =>
-                        x || remote_first_put_promise.then(() =>
-                            braid_blob.get(a, a_ops)))
+                    braid_blob.get(a, a_ops).then(x => {
+                        if (x) got_local_file()
+                        else remote_first_put_promise.then(() =>
+                            braid_blob.get(a, a_ops))
+                    })
 
-                    // NOTE: this should not return, but it might throw
-                    await braid_blob.get(b, b_ops)
+                    // Get the response to check Editable header
+                    var remote_res = await braid_blob.get(b, b_ops)
+                    if (remote_res) got_remote_res()
 
-                    // this will only return if it couldn't find the key
-                    await local_first_put_promise
-                    disconnect()
-                    connect()
-                } catch (e) {
-                    if (closed) {
-                        return
+                    // If remote doesn't exist yet, wait for it to be created then reconnect
+                    if (!remote_res) {
+                        await local_first_put_promise
+                        disconnect()
+                        connect()
                     }
-
-                    disconnect()
-                    console.log(`disconnected, retrying in 1 second`)
-                    setTimeout(connect, 1000)
+                    // Otherwise, on_error will call handle_error when connection drops
+                } catch (e) {
+                    handle_error(e)
                 }
             }
             connect()
