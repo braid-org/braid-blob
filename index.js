@@ -429,6 +429,7 @@ function create_braid_blob() {
 
                     var b_ops = {
                         signal: ac.signal,
+                        dont_retry: true,
                         subscribe: async update => {
                             await braid_blob.put(a, update.body, {
                                 version: update.version,
