@@ -1419,7 +1419,7 @@ runTest(
                     var result1 = await bb1.get(test_key)
 
                     // Check what metadata was saved
-                    var meta1 = bb1.db.get_meta(test_key)
+                    var meta1 = bb1.meta_cache[test_key]
                     var debug_info = 'meta1: ' + JSON.stringify(meta1) + '; '
 
                     // Wait a bit to ensure file system has settled
@@ -1435,7 +1435,7 @@ runTest(
                     var result2 = await bb2.get(test_key)
 
                     // Check what metadata bb2 sees
-                    var meta2 = bb2.db.get_meta(test_key)
+                    var meta2 = bb2.meta_cache[test_key]
                     debug_info += 'meta2: ' + JSON.stringify(meta2) + '; '
 
                     // The version should be the same - no new event ID generated

@@ -1,5 +1,4 @@
 var {http_server: braidify, fetch: braid_fetch} = require('braid-http'),
-    {url_file_db} = require('url-file-db'),
     fs = require('fs'),
     path = require('path')
 
@@ -11,7 +10,7 @@ function create_braid_blob() {
         meta_cache: {},
         key_to_subs: {},
         peer: null, // will be auto-generated if not set by the user
-        db: null // url-file-db instance
+        db: null // object with read/write/delete methods
     }
 
     braid_blob.init = async () => {
@@ -24,15 +23,36 @@ function create_braid_blob() {
             // Ensure our meta folder exists
             await fs.promises.mkdir(braid_blob.meta_folder, { recursive: true })
 
-            // Create a fake meta folder for url-file-db (we manage our own meta)
-            var fake_meta_folder = braid_blob.meta_folder + '-fake'
-            await fs.promises.mkdir(fake_meta_folder, { recursive: true })
-
-            // Create url-file-db instance (with fake meta folder - we manage our own)
-            braid_blob.db = await url_file_db.create(
-                braid_blob.db_folder,
-                fake_meta_folder
-            )
+            // Set up db - either use provided object or create file-based storage
+            if (typeof braid_blob.db_folder === 'string') {
+                await fs.promises.mkdir(braid_blob.db_folder, { recursive: true })
+                braid_blob.db = {
+                    read: async (key) => {
+                        var file_path = path.join(braid_blob.db_folder, encode_filename(key))
+                        try {
+                            return await fs.promises.readFile(file_path)
+                        } catch (e) {
+                            if (e.code === 'ENOENT') return null
+                            throw e
+                        }
+                    },
+                    write: async (key, data) => {
+                        var file_path = path.join(braid_blob.db_folder, encode_filename(key))
+                        await fs.promises.writeFile(file_path, data)
+                    },
+                    delete: async (key) => {
+                        var file_path = path.join(braid_blob.db_folder, encode_filename(key))
+                        try {
+                            await fs.promises.unlink(file_path)
+                        } catch (e) {
+                            if (e.code !== 'ENOENT') throw e
+                        }
+                    }
+                }
+            } else {
+                // db_folder is already an object with read/write/delete
+                braid_blob.db = braid_blob.db_folder
+            }
 
             // establish a peer id if not already set
             if (!braid_blob.peer)
@@ -264,7 +284,7 @@ function create_braid_blob() {
 
         if (!options.key) {
             var url = new URL(req.url, 'http://localhost')
-            options.key = url_file_db.get_canonical_path(url.pathname)
+            options.key = url.pathname
         }
 
         braidify(req, res)
