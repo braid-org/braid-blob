@@ -1021,8 +1021,8 @@ runTest(
 runTest(
     "test sync two local keys",
     async () => {
-        var key1 = 'test-sync-local1-' + Math.random().toString(36).slice(2)
-        var key2 = 'test-sync-local2-' + Math.random().toString(36).slice(2)
+        var key1 = '/test-sync-local1-' + Math.random().toString(36).slice(2)
+        var key2 = '/test-sync-local2-' + Math.random().toString(36).slice(2)
 
         var r1 = await braid_fetch(`/eval`, {
             method: 'POST',
@@ -1049,7 +1049,7 @@ runTest(
         await new Promise(done => setTimeout(done, 100))
 
         // Check second key has the content
-        var r = await braid_fetch(`/${key2}`)
+        var r = await braid_fetch(`${key2}`)
         return await r.text()
     },
     'sync local content'
@@ -1058,11 +1058,11 @@ runTest(
 runTest(
     "test sync remote to local (swap)",
     async () => {
-        var local_key = 'test-sync-swap-local-' + Math.random().toString(36).slice(2)
-        var remote_key = 'test-sync-swap-remote-' + Math.random().toString(36).slice(2)
+        var local_key = '/test-sync-swap-local-' + Math.random().toString(36).slice(2)
+        var remote_key = '/test-sync-swap-remote-' + Math.random().toString(36).slice(2)
 
         // Put something on the server first
-        await braid_fetch(`/${remote_key}`, {
+        await braid_fetch(`${remote_key}`, {
             method: 'PUT',
             version: ['800'],
             body: 'remote content'
@@ -1073,7 +1073,7 @@ runTest(
             body: `void (async () => {
                 try {
                     var braid_blob = require(\`\${__dirname}/../index.js\`)
-                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '${remote_key}')
 
                     // Start sync with URL as first argument (should swap internally)
                     braid_blob.sync(remote_url, '${local_key}')
@@ -1091,7 +1091,7 @@ runTest(
         await new Promise(done => setTimeout(done, 100))
 
         // Check local key has the remote content
-        var r = await braid_fetch(`/${local_key}`)
+        var r = await braid_fetch(`${local_key}`)
         return await r.text()
     },
     'remote content'

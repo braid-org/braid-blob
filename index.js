@@ -1,5 +1,6 @@
 var {http_server: braidify, fetch: braid_fetch} = require('braid-http'),
     {url_file_db} = require('url-file-db'),
+    fs = require('fs'),
     path = require('path')
 
 function create_braid_blob() {
@@ -7,9 +8,10 @@ function create_braid_blob() {
         db_folder: './braid-blob-db',
         meta_folder: './braid-blob-meta',
         cache: {},
+        meta_cache: {},
         key_to_subs: {},
         peer: null, // will be auto-generated if not set by the user
-        db: null // url-file-db instance with integrated meta storage
+        db: null // url-file-db instance
     }
 
     braid_blob.init = async () => {
@@ -19,10 +21,17 @@ function create_braid_blob() {
         await braid_blob.init()
 
         async function real_init() {
-            // Create url-file-db instance with integrated meta storage
+            // Ensure our meta folder exists
+            await fs.promises.mkdir(braid_blob.meta_folder, { recursive: true })
+
+            // Create a fake meta folder for url-file-db (we manage our own meta)
+            var fake_meta_folder = braid_blob.meta_folder + '-fake'
+            await fs.promises.mkdir(fake_meta_folder, { recursive: true })
+
+            // Create url-file-db instance (with fake meta folder - we manage our own)
             braid_blob.db = await url_file_db.create(
                 braid_blob.db_folder,
-                braid_blob.meta_folder,
+                fake_meta_folder,
                 async (db, key) => {
                     // File changed externally, notify subscriptions
                     // Use db parameter instead of braid_blob.db to avoid race condition
@@ -34,6 +43,37 @@ function create_braid_blob() {
             // establish a peer id if not already set
             if (!braid_blob.peer)
                 braid_blob.peer = Math.random().toString(36).slice(2)
+        }
+    }
+
+    function get_meta(key) {
+        if (braid_blob.meta_cache[key]) return braid_blob.meta_cache[key]
+        var meta_path = path.join(braid_blob.meta_folder, encode_filename(key))
+        try {
+            var data = fs.readFileSync(meta_path, 'utf8')
+            braid_blob.meta_cache[key] = JSON.parse(data)
+            return braid_blob.meta_cache[key]
+        } catch (e) {
+            if (e.code === 'ENOENT') return null
+            throw e
+        }
+    }
+
+    async function update_meta(key, updates) {
+        var meta = get_meta(key) || {}
+        Object.assign(meta, updates)
+        braid_blob.meta_cache[key] = meta
+        var meta_path = path.join(braid_blob.meta_folder, encode_filename(key))
+        await fs.promises.writeFile(meta_path, JSON.stringify(meta))
+    }
+
+    async function delete_meta(key) {
+        delete braid_blob.meta_cache[key]
+        var meta_path = path.join(braid_blob.meta_folder, encode_filename(key))
+        try {
+            await fs.promises.unlink(meta_path)
+        } catch (e) {
+            if (e.code !== 'ENOENT') throw e
         }
     }
 
@@ -59,8 +99,7 @@ function create_braid_blob() {
         await braid_blob.init()
         if (options.signal?.aborted) return
 
-        // Read the meta data using new meta API
-        var meta = braid_blob.db.get_meta(key) || {}
+        var meta = get_meta(key) || {}
 
         var their_e =
             !options.version ?
@@ -86,7 +125,7 @@ function create_braid_blob() {
             if (options.content_type)
                 meta_updates.content_type = options.content_type
 
-            await braid_blob.db.update_meta(key, meta_updates)
+            await update_meta(key, meta_updates)
             if (options.signal?.aborted) return
 
             // Notify all subscriptions of the update
@@ -134,8 +173,7 @@ function create_braid_blob() {
 
         await braid_blob.init()
 
-        // Read the meta data using new meta API
-        var meta = braid_blob.db.get_meta(key) || {}
+        var meta = get_meta(key) || {}
         if (meta.event == null) return null
 
         var result = {
@@ -217,8 +255,9 @@ function create_braid_blob() {
         await braid_blob.init()
         if (options.signal?.aborted) return
 
-        // Delete the file from the database
+        // Delete the file and its metadata
         await braid_blob.db.delete(key)
+        await delete_meta(key)
 
         // TODO: notify subscribers of deletion once we have a protocol for that
         // For now, just clean up the subscriptions
@@ -532,6 +571,35 @@ function create_braid_blob() {
         }
         
         return false;
+    }
+
+    function encode_filename(s) {
+        // Deal with case insensitivity
+        var bits = s.match(/\p{L}/ug).
+            map(c => +(c === c.toUpperCase())).join('')
+        var postfix = BigInt('0b0' + bits).toString(16)
+
+        // Swap ! and /
+        s = s.replace(/[\/!]/g, x => x === '/' ? '!' : '/')
+
+        // Encode characters that are unsafe on various filesystems:
+        //   < > : " / \ | ? *  - Windows restrictions
+        //   %                  - Reserved for encoding
+        //   \x00-\x1f, \x7f    - Control characters
+        s = s.replace(/[<>:"/|\\?*%\x00-\x1f\x7f]/g, encode_char)
+
+        // Deal with windows reserved words
+        if (s.match(/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i))
+            s = s.slice(0, 2) + encode_char(s[2]) + s.slice(3)
+
+        // Deal with case insensitivity
+        s += '.' + postfix
+
+        return s
+
+        function encode_char(char) {
+            return '%' + char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')
+        }
     }
 
     braid_blob.create_braid_blob = create_braid_blob

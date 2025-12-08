@@ -193,6 +193,7 @@ async function runConsoleTests() {
         // Clean up main test folders
         await fs.rm(path.join(__dirname, 'test_db_folder'), { recursive: true, force: true })
         await fs.rm(path.join(__dirname, 'test_meta_folder'), { recursive: true, force: true })
+        await fs.rm(path.join(__dirname, 'test_meta_folder-fake'), { recursive: true, force: true })
 
         // Clean up any leftover test-* directories
         const entries = await fs.readdir(__dirname)
