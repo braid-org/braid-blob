@@ -416,17 +416,6 @@ function create_braid_blob() {
                     }
 
                     // Remote -> local: subscribe to remote updates
-                    // We need both: remote_res (for Editable header) and local file exists
-                    var got_remote_res, got_local_file
-                    var remote_res_promise = new Promise(done => got_remote_res = done)
-                    var local_file_promise = new Promise(done => got_local_file = done)
-
-                    // Apply read-only once we have both remote response and local file
-                    Promise.all([remote_res_promise, local_file_promise]).then(async () => {
-                        var read_only = remote_res.headers?.get('editable') === 'false'
-                        await braid_blob.db.set_read_only(a, read_only)
-                    })
-
                     var b_ops = {
                         signal: ac.signal,
                         dont_retry: true,
@@ -435,7 +424,6 @@ function create_braid_blob() {
                                 version: update.version,
                                 content_type: update.headers?.['content-type']
                             })
-                            got_local_file()
                             remote_first_put()
                         },
                         on_error: handle_error
@@ -446,15 +434,11 @@ function create_braid_blob() {
                     }
 
                     // Set up both subscriptions, handling cases where one doesn't exist yet
-                    braid_blob.get(a, a_ops).then(x => {
-                        if (x) got_local_file()
-                        else remote_first_put_promise.then(() =>
-                            braid_blob.get(a, a_ops))
-                    })
+                    braid_blob.get(a, a_ops).then(x =>
+                        x || remote_first_put_promise.then(() =>
+                            braid_blob.get(a, a_ops)))
 
-                    // Get the response to check Editable header
                     var remote_res = await braid_blob.get(b, b_ops)
-                    if (remote_res) got_remote_res()
 
                     // If remote doesn't exist yet, wait for it to be created then reconnect
                     if (!remote_res) {
