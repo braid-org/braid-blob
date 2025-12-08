@@ -1,6 +1,6 @@
 # braid-blob
 
-A simple, self-contained library for synchronizing binary blobs (files, images, etc.) over HTTP using [Braid-HTTP](https://braid.org). It provides real-time synchronization with last-write-wins (LWW) conflict resolution and persistent storage.
+A simple, self-contained library for synchronizing binary blobs (files, images, etc.) over HTTP using [Braid-HTTP](https://braid.org). It provides real-time synchronization with arbitrary-writer-wins (AWW) conflict resolution and persistent storage.
 
 ## Quick Start
 

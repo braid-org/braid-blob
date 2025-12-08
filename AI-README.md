@@ -103,7 +103,7 @@ COMPARISON_RULES:
   1. Compare numeric length of timestamp
   2. If equal, lexicographic compare timestamp
   3. If equal, lexicographic compare full version string
-MERGE_TYPE: last-write-wins (lww)
+MERGE_TYPE: arbitrary-writer-wins (aww)
 ```
 
 ## METADATA_SCHEMA
@@ -145,7 +145,7 @@ SIDE_EFFECTS:
 VERSION_LOGIC:
   - If options.version provided: use options.version[0]
   - Else: generate "{peer}-{max(Date.now(), last_version_seq+1)}"
-  - Only write if new version > existing version (lww)
+  - Only write if new version > existing version (aww)
 ```
 
 ### get(key, options)
@@ -320,7 +320,7 @@ HTTP_HEADERS:
     Current-Version: "v1"            # for subscribed GET
     Editable: true
     Accept-Subscribe: true
-    Merge-Type: lww
+    Merge-Type: aww
     Content-Type: mime/type
 
 STATUS_CODES:
@@ -332,7 +332,7 @@ STATUS_CODES:
 
 BRAID_UPDATE_FORMAT:
   Version: "v1"\r\n
-  Merge-Type: lww\r\n
+  Merge-Type: aww\r\n
   Content-Length: N\r\n
   \r\n
   {body}
