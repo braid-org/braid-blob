@@ -96,7 +96,7 @@ function create_braid_blob() {
                     if (peer !== options.peer)
                         sub.sendUpdate({
                             version: [meta.event],
-                            'Merge-Type': 'lww',
+                            'Merge-Type': 'aww',
                             body
                         })
         }
@@ -247,7 +247,7 @@ function create_braid_blob() {
             if (req.method === 'GET' || req.method === 'HEAD') {
                 if (!res.hasHeader("editable")) res.setHeader("Editable", "true")
                 if (!req.subscribe) res.setHeader("Accept-Subscribe", "true")
-                res.setHeader("Merge-Type", "lww")
+                res.setHeader("Merge-Type", "aww")
 
                 try {
                     var result = await braid_blob.get(options.key, {
@@ -267,7 +267,7 @@ function create_braid_blob() {
                         subscribe: req.subscribe ? (update) => {
                             res.sendUpdate({
                                 version: update.version,
-                                'Merge-Type': 'lww',
+                                'Merge-Type': 'aww',
                                 body: update.body
                             })
                         } : null
