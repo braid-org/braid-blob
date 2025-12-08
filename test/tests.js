@@ -1365,7 +1365,7 @@ runTest(
                     bb2.db_folder = db_folder
                     bb2.meta_folder = meta_folder
 
-                    // This should NOT trigger a file change callback
+                    // Get the file from the new instance
                     var result2 = await bb2.get(test_key)
 
                     // Version should still be version-2, not regenerated
@@ -1452,95 +1452,6 @@ runTest(
                     // Clean up even on error
                     await fs.rm(db_folder, { recursive: true, force: true })
                     await fs.rm(meta_folder, { recursive: true, force: true })
-                    res.end('error: ' + e.message)
-                }
-            })()`
-        })
-        return await r1.text()
-    },
-    'true'
-)
-
-runTest(
-    "test that callback receives db parameter for use before assignment",
-    async () => {
-        var r1 = await braid_fetch(`/eval`, {
-            method: 'POST',
-            body: `void (async () => {
-                var fs = require('fs').promises
-                var test_id = 'test-callback-' + Math.random().toString(36).slice(2)
-                var db_folder = __dirname + '/' + test_id + '-db'
-                var meta_folder = __dirname + '/' + test_id + '-meta'
-
-                try {
-                    // Pre-create files that will trigger callback during init
-                    await fs.mkdir(db_folder, { recursive: true })
-                    await fs.mkdir(meta_folder, { recursive: true })
-
-                    // Write a file that exists before init
-                    await fs.writeFile(db_folder + '/pre-existing', 'old content')
-
-                    // Create metadata for it with old timestamp to trigger callback
-                    await fs.writeFile(meta_folder + '/!pre-existing', JSON.stringify({
-                        canonical_path: '/pre-existing',
-                        event: 'old-version',
-                        last_seen: Date.now() - 10000,
-                        mtime_ns: '1000000000000000'
-                    }))
-
-                    // Wait for files to be written
-                    await new Promise(resolve => setTimeout(resolve, 100))
-
-                    var callback_error = null
-                    var callback_called = false
-                    var db_was_null = false
-
-                    // Monkey-patch url_file_db.create to intercept callback
-                    var url_file_db_module = require('url-file-db').url_file_db
-                    var original_create = url_file_db_module.create
-
-                    url_file_db_module.create = async function(db_dir, meta_dir, callback) {
-                        var wrapped_callback = async function(db, key) {
-                            callback_called = true
-                            // Check if bb.db is null during callback
-                            if (!bb.db) {
-                                db_was_null = true
-                            }
-                            try {
-                                await callback(db, key)
-                            } catch (e) {
-                                callback_error = e.message
-                            }
-                        }
-                        return await original_create.call(this, db_dir, meta_dir, wrapped_callback)
-                    }
-
-                    var bb = braid_blob.create_braid_blob()
-                    bb.db_folder = db_folder
-                    bb.meta_folder = meta_folder
-
-                    // Init will trigger callback for pre-existing file
-                    // Callback tries to use braid_blob.db.read() but db not assigned yet
-                    await bb.init()
-
-                    // Restore
-                    url_file_db_module.create = original_create
-
-                    // Clean up
-                    await fs.rm(db_folder, { recursive: true, force: true })
-                    await fs.rm(meta_folder, { recursive: true, force: true })
-
-                    if (!callback_called) {
-                        res.end('callback was not called')
-                    } else if (callback_error) {
-                        res.end('callback error: ' + callback_error)
-                    } else {
-                        // Success: callback worked even if bb.db was null (using db param)
-                        res.end('true')
-                    }
-                } catch (e) {
-                    await fs.rm(db_folder, { recursive: true, force: true }).catch(() => {})
-                    await fs.rm(meta_folder, { recursive: true, force: true }).catch(() => {})
                     res.end('error: ' + e.message)
                 }
             })()`

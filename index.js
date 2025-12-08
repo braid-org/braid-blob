@@ -31,13 +31,7 @@ function create_braid_blob() {
             // Create url-file-db instance (with fake meta folder - we manage our own)
             braid_blob.db = await url_file_db.create(
                 braid_blob.db_folder,
-                fake_meta_folder,
-                async (db, key) => {
-                    // File changed externally, notify subscriptions
-                    // Use db parameter instead of braid_blob.db to avoid race condition
-                    var body = await db.read(key)
-                    await braid_blob.put(key, body, { skip_write: true })
-                }
+                fake_meta_folder
             )
 
             // establish a peer id if not already set
