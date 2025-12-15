@@ -201,7 +201,7 @@ function create_braid_blob() {
             throw new Error('unkown version: ' + options.version)
         if (options.parents && options.parents.length && compare_events(options.parents[0], meta.event) > 0)
             throw new Error('unkown version: ' + options.parents)
-        if (options.head) return
+        if (options.head) return result
 
         if (options.subscribe) {
             var subscribe_chain = Promise.resolve()
@@ -432,7 +432,8 @@ function create_braid_blob() {
                 try {
                     // Check if remote has our current version (simple fork-point check)
                     var local_result = await braid_blob.get(a, {
-                        signal: ac.signal
+                        signal: ac.signal,
+                        head: true
                     })
                     var local_version = local_result ? local_result.version : null
                     var server_has_our_version = false

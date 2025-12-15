@@ -1200,6 +1200,68 @@ runTest(
 )
 
 runTest(
+    "test sync connect does not read file body for version check",
+    async () => {
+        var local_key = '/test-sync-no-read-' + Math.random().toString(36).slice(2)
+        var remote_key = 'test-sync-no-read-remote-' + Math.random().toString(36).slice(2)
+
+        // Put something on remote with SAME version as local, so no data needs to flow
+        var put_result = await braid_fetch(`/${remote_key}`, {
+            method: 'PUT',
+            version: ['same-version-123'],
+            body: 'same content'
+        })
+        if (!put_result.ok) return 'PUT status: ' + put_result.status
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Put locally with SAME version - so when sync connects, no updates need to flow
+                    await braid_blob.put('${local_key}', Buffer.from('same content'), { version: ['same-version-123'] })
+
+                    // Wrap db.read to count calls for our specific key
+                    var read_count = 0
+                    var original_read = braid_blob.db.read
+                    braid_blob.db.read = async function(key) {
+                        if (key === '${local_key}') read_count++
+                        return original_read.call(this, key)
+                    }
+
+                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+
+                    // Create an AbortController to stop the sync
+                    var ac = new AbortController()
+
+                    // Start sync - since both have same version, no updates should flow
+                    braid_blob.sync('${local_key}', remote_url, { signal: ac.signal })
+
+                    // Wait for sync to establish connection
+                    await new Promise(done => setTimeout(done, 300))
+
+                    // Stop sync
+                    ac.abort()
+
+                    // Restore original read
+                    braid_blob.db.read = original_read
+
+                    // db.read should not have been called since:
+                    // 1. Initial version check uses head:true (no body read)
+                    // 2. Both have same version so no updates flow
+                    res.end(read_count === 0 ? 'no reads' : 'reads: ' + read_count)
+                } catch (e) {
+                    res.end('error: ' + e.message + ' ' + e.stack)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'no reads'
+)
+
+runTest(
     "test sync closed during error",
     async () => {
         var local_key = 'test-sync-closed-local-' + Math.random().toString(36).slice(2)
