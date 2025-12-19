@@ -70,7 +70,7 @@ function createTestServer(options = {}) {
                 req.on('end', () => done(Buffer.concat(chunks)))
             })
             try {
-                eval('' + body)
+                eval(body.toString('utf8'))
             } catch (error) {
                 res.writeHead(500, { 'Content-Type': 'text/plain' })
                 res.end(`Error: ${error.message}`)
@@ -181,7 +181,7 @@ async function runConsoleTests() {
 
     // Print summary
     console.log('\n' + '='.repeat(50))
-    console.log(`Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`)
+    console.log(`Total: ${totalTests} | ✓: ${passedTests} | ✗: ${failedTests}`)
     console.log('='.repeat(50))
 
     // Clean up test directories

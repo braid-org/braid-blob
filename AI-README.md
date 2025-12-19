@@ -188,7 +188,7 @@ SUBSCRIPTION_BEHAVIOR:
   - Subscription callback receives: {body: Buffer, version: [string], content_type: string}
 
 ERROR_HANDLING:
-  - Throws "unkown version: {version}" if requested version > local version
+  - Throws "unknown version: {version}" if requested version > local version
   - Returns 309 status code via serve() when version unknown
 ```
 
@@ -426,7 +426,7 @@ url-file-db (^0.0.15):
 ## ERROR_CONDITIONS
 
 ```
-"unkown version: {version}"
+"unknown version: {version}"
   - GET with version/parents newer than local version
   - Results in 309 status via serve()
 

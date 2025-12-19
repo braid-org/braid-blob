@@ -88,6 +88,49 @@ Handles HTTP requests for blob storage and synchronization.
 - `PUT` - Store/update a blob
 - `DELETE` - Remove a blob
 
+### `braid_blob.get(key, options)`
+
+Retrieves a blob from local storage or a remote URL.
+
+**Parameters:**
+- `key` - Local storage key (string) or remote URL (URL object)
+- `options` - Optional configuration object
+  - `version` - Request a specific version
+  - `parents` - Version parents for subscription fork-point
+  - `subscribe` - Callback function for real-time updates
+  - `head` - If true, returns only metadata (version, content_type) without body
+  - `content_type` / `accept` - Content type for the request
+  - `signal` - AbortSignal for cancellation
+
+**Returns:** `{version, body, content_type}` object, or `null` if not found.
+
+### `braid_blob.put(key, body, options)`
+
+Stores a blob to local storage or a remote URL.
+
+**Parameters:**
+- `key` - Local storage key (string) or remote URL (URL object)
+- `body` - Buffer or data to store
+- `options` - Optional configuration object
+  - `version` - Version identifier
+  - `content_type` / `accept` - Content type of the blob
+  - `signal` - AbortSignal for cancellation
+
+### `braid_blob.sync(a, b, options)`
+
+Bidirectionally synchronizes blobs between two endpoints (local keys or URLs).
+
+**Parameters:**
+- `a` - First endpoint (local key or URL)
+- `b` - Second endpoint (local key or URL)
+- `options` - Optional configuration object
+  - `signal` - AbortSignal for cancellation (use to stop sync)
+  - `content_type` / `accept` - Content type for requests
+  - `on_pre_connect` - Async callback before connection attempt
+  - `on_disconnect` - Callback when connection drops
+  - `on_unauthorized` - Callback on 401/403 responses
+  - `on_res` - Callback receiving the response object
+
 ## Testing
 
 ### to run unit tests:

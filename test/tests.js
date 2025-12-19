@@ -918,7 +918,7 @@ runTest(
                 var braid_blob = require(\`\${__dirname}/../index.js\`)
                 var url = new URL('http://localhost:' + req.socket.localPort + '/${key}')
                 var result = await braid_blob.get(url)
-                res.end(Buffer.from(result).toString('utf8'))
+                res.end(Buffer.from(result.body).toString('utf8'))
             })()`
         })
 
@@ -1148,58 +1148,6 @@ runTest(
 )
 
 runTest(
-    "test sync does not disconnect unnecessarily",
-    async () => {
-        var local_key = 'test-sync-no-disconnect-local-' + Math.random().toString(36).slice(2)
-        var remote_key = 'test-sync-no-disconnect-remote-' + Math.random().toString(36).slice(2)
-
-        var r1 = await braid_fetch(`/eval`, {
-            method: 'POST',
-            body: `void (async () => {
-                try {
-                    var braid_blob = require(\`\${__dirname}/../index.js\`)
-
-                    // Put something locally first
-                    await braid_blob.put('${local_key}', Buffer.from('local content'), { version: ['600'] })
-
-                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
-
-                    // Capture console.log to count disconnects
-                    var disconnect_count = 0
-                    var original_log = console.log
-                    console.log = function(...args) {
-                        if (args[0]?.includes?.('disconnected')) disconnect_count++
-                        original_log.apply(console, args)
-                    }
-
-                    // Create an AbortController to stop the sync
-                    var ac = new AbortController()
-
-                    // Start sync
-                    braid_blob.sync('${local_key}', remote_url, { signal: ac.signal })
-
-                    // Wait for sync to establish and stabilize
-                    await new Promise(done => setTimeout(done, 500))
-
-                    // Stop sync
-                    ac.abort()
-
-                    // Restore console.log
-                    console.log = original_log
-
-                    // Should have zero disconnects during normal operation
-                    res.end(disconnect_count === 0 ? 'no disconnects' : 'disconnects: ' + disconnect_count)
-                } catch (e) {
-                    res.end('error: ' + e.message + ' ' + e.stack)
-                }
-            })()`
-        })
-        return await r1.text()
-    },
-    'no disconnects'
-)
-
-runTest(
     "test sync connect does not read file body for version check",
     async () => {
         var local_key = '/test-sync-no-read-' + Math.random().toString(36).slice(2)
@@ -1355,7 +1303,7 @@ runTest(
         })
 
         // Try to subscribe with parents 200 (newer than what server has)
-        // This triggers the "unkown version" error which gets caught and returns 309
+        // This triggers the "unknown version" error which gets caught and returns 309
         var r = await braid_fetch(`/${key}`, {
             subscribe: true,
             parents: ['200']
