@@ -92,8 +92,7 @@ function create_braid_blob() {
     }
 
     braid_blob.put = async (key, body, options = {}) => {
-        // What's the content type?
-        var content_type = options.content_type || options.accept || get_header(options.headers, 'content-type') || get_header(options.headers, 'accept')
+        options = normalize_options(options)
 
         // Handle URL case - make a remote PUT request
         if (key instanceof URL) {
@@ -107,9 +106,9 @@ function create_braid_blob() {
                 params.retry = () => true
             for (var x of ['headers', 'version', 'peer'])
                 if (options[x] != null) params[x] = options[x]
-            if (content_type)
+            if (options.content_type)
                 params.headers = { ...params.headers,
-                    'Content-Type': content_type }
+                    'Content-Type': options.content_type }
 
             return await braid_fetch(key.href, params)
         }
@@ -140,8 +139,8 @@ function create_braid_blob() {
 
             // Update only the fields we want to change in metadata
             var meta_updates = { event: their_e }
-            if (content_type)
-                meta_updates.content_type = content_type
+            if (options.content_type)
+                meta_updates.content_type = options.content_type
 
             await update_meta(key, meta_updates)
             if (options.signal?.aborted) return
@@ -150,7 +149,7 @@ function create_braid_blob() {
             // (except the peer which made the PUT request itself)
             if (braid_blob.key_to_subs[key])
                 for (var [peer, sub] of braid_blob.key_to_subs[key].entries())
-                    if (peer !== options.peer)
+                    if (!options.peer || options.peer !== peer)
                         sub.sendUpdate({
                             version: [meta.event],
                             'Merge-Type': 'aww',
@@ -162,8 +161,7 @@ function create_braid_blob() {
     }
 
     braid_blob.get = async (key, options = {}) => {
-        // What's the content type?
-        var content_type = options.content_type || options.accept || get_header(options.headers, 'content-type') || get_header(options.headers, 'accept')
+        options = normalize_options(options)
 
         // Handle URL case - make a remote GET request
         if (key instanceof URL) {
@@ -179,9 +177,9 @@ function create_braid_blob() {
             if (options.head) params.method = 'HEAD'
             for (var x of ['headers', 'parents', 'version', 'peer'])
                 if (options[x] != null) params[x] = options[x]
-            if (content_type)
+            if (options.content_type)
                 params.headers = { ...params.headers,
-                    'Accept': content_type }
+                    'Accept': options.content_type }
 
             var res = await braid_fetch(key.href, params)
 
@@ -210,7 +208,7 @@ function create_braid_blob() {
 
         var result = {
             version: [meta.event],
-            content_type: meta.content_type || content_type
+            content_type: meta.content_type || options.content_type
         }
         if (options.header_cb) await options.header_cb(result)
         if (options.signal?.aborted) return
@@ -237,7 +235,7 @@ function create_braid_blob() {
                     options.my_subscribe({
                         body: update.body,
                         version: update.version,
-                        content_type: meta.content_type || content_type
+                        content_type: meta.content_type || options.content_type
                     })
                 }
             })
@@ -271,6 +269,8 @@ function create_braid_blob() {
     }
 
     braid_blob.delete = async (key, options = {}) => {
+        options = normalize_options(options)
+
         // Handle URL case - make a remote DELETE request
         if (key instanceof URL) {
 
@@ -388,8 +388,8 @@ function create_braid_blob() {
     }
 
     braid_blob.sync = (a, b, options = {}) => {
-        // What's the content type?
-        var content_type = options.content_type || options.accept || get_header(options.headers, 'content-type') || get_header(options.headers, 'accept')
+        options = normalize_options(options)
+        if (!options.peer) options.peer = Math.random().toString(36).slice(2)
 
         if ((a instanceof URL) === (b instanceof URL)) {
             // Both are URLs or both are local keys
@@ -400,13 +400,15 @@ function create_braid_blob() {
             var a_ops = {
                 signal: options.signal,
                 headers: options.headers,
-                content_type,
+                content_type: options.content_type,
+                peer: options.peer,
                 subscribe: update => {
                     braid_blob.put(b, update.body, {
                         signal: options.signal,
                         version: update.version,
                         headers: options.headers,
-                        content_type: update.content_type
+                        content_type: update.content_type,
+                        peer: options.peer,
                     }).then(a_first_put)
                 }
             }
@@ -417,13 +419,15 @@ function create_braid_blob() {
             var b_ops = {
                 signal: options.signal,
                 headers: options.headers,
-                content_type,
+                content_type: options.content_type,
+                peer: options.peer,
                 subscribe: update => {
                     braid_blob.put(a, update.body, {
                         signal: options.signal,
                         version: update.version,
                         headers: options.headers,
-                        content_type: update.content_type
+                        content_type: update.content_type,
+                        peer: options.peer,
                     }).then(b_first_put)
                 }
             }
@@ -464,7 +468,8 @@ function create_braid_blob() {
                         signal: ac.signal,
                         head: true,
                         headers: options.headers,
-                        content_type
+                        content_type: options.content_type,
+                        peer: options.peer,
                     })
                     var local_version = local_result ? local_result.version : null
                     var server_has_our_version = false
@@ -476,7 +481,8 @@ function create_braid_blob() {
                             dont_retry: true,
                             version: local_version,
                             headers: options.headers,
-                            content_type
+                            content_type: options.content_type,
+                            peer: options.peer,
                         })
                         server_has_our_version = !!r
                     }
@@ -485,7 +491,8 @@ function create_braid_blob() {
                     var a_ops = {
                         signal: ac.signal,
                         headers: options.headers,
-                        content_type,
+                        content_type: options.content_type,
+                        peer: options.peer,
                         subscribe: async update => {
                             try {
                                 var x = await braid_blob.put(b, update.body, {
@@ -493,7 +500,8 @@ function create_braid_blob() {
                                     dont_retry: true,
                                     version: update.version,
                                     headers: options.headers,
-                                    content_type: update.content_type
+                                    content_type: update.content_type,
+                                    peer: options.peer,
                                 })
                                 if (x.ok) local_first_put()
                                 else if (x.status === 401 || x.status === 403) {
@@ -515,12 +523,14 @@ function create_braid_blob() {
                         signal: ac.signal,
                         dont_retry: true,
                         headers: options.headers,
-                        content_type,
+                        content_type: options.content_type,
+                        peer: options.peer,
                         subscribe: async update => {
                             await braid_blob.put(a, update.body, {
                                 version: update.version,
                                 headers: options.headers,
-                                content_type: update.content_type
+                                content_type: update.content_type,
+                                peer: options.peer,
                             })
                             remote_first_put()
                         },
@@ -678,6 +688,46 @@ function create_braid_blob() {
         for (var headerKey of Object.keys(headers))
             if (headerKey.toLowerCase() === lowerKey)
                 return headers[headerKey]
+    }
+
+    function normalize_options(options = {}) {
+        if (!normalize_options.special) {
+            normalize_options.special = {
+                version: 'version',
+                parents: 'parents',
+                'content-type': 'content_type',
+                accept: 'content_type',
+                peer: 'peer',
+            }
+        }
+
+        var normalized = {}
+        Object.assign(normalized, options)
+
+        // Normalize top-level accept to content_type
+        if (options.accept) {
+            normalized.content_type = options.accept
+            delete normalized.accept
+        }
+
+        if (options.headers) {
+            normalized.headers = {}
+            for (var [k, v] of (options.headers instanceof Headers ?
+                options.headers.entries() :
+                Object.entries(options.headers))) {
+                var s = normalize_options.special[k]
+                if (s) normalized[s] = v
+                else normalized.headers[k] = v
+            }
+        }
+
+        // Normalize version/parents strings to arrays
+        if (typeof normalized.version === 'string')
+            normalized.version = JSON.parse('[' + normalized.version + ']')
+        if (typeof normalized.parents === 'string')
+            normalized.parents = JSON.parse('[' + normalized.parents + ']')
+
+        return normalized
     }
 
     braid_blob.create_braid_blob = create_braid_blob
