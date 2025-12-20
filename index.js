@@ -464,13 +464,7 @@ function create_braid_blob() {
 
                 try {
                     // Check if remote has our current version (simple fork-point check)
-                    var local_result = await braid_blob.get(a, {
-                        signal: ac.signal,
-                        head: true,
-                        headers: options.headers,
-                        content_type: options.content_type,
-                        peer: options.peer,
-                    })
+                    var local_result = await braid_blob.get(a, { head: true })
                     var local_version = local_result ? local_result.version : null
                     var server_has_our_version = false
 
@@ -546,8 +540,12 @@ function create_braid_blob() {
 
                     // Set up both subscriptions, handling cases where one doesn't exist yet
                     braid_blob.get(a, a_ops).then(x =>
-                        x || remote_first_put_promise.then(() =>
-                            braid_blob.get(a, a_ops)))
+                        x || remote_first_put_promise.then(async () => {
+                            // update parents, since we know remote has the version we just got from them..
+                            var local_result = await braid_blob.get(a, { head: true })
+                            a_ops.parents = local_result.version
+                            braid_blob.get(a, a_ops)
+                        }))
 
                     var remote_res = await braid_blob.get(b, b_ops)
 
