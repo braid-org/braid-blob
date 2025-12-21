@@ -378,7 +378,7 @@ runTest(
 
         return r.status
     },
-    '204'
+    '200'
 )
 
 runTest(
@@ -431,45 +431,35 @@ runTest(
 )
 
 runTest(
-    "test braid_blob.delete() cleans up subscriptions",
+    "test that aborting cleans up subscription",
     async () => {
         var r1 = await braid_fetch(`/eval`, {
             method: 'POST',
             body: `void (async () => {
-                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
-                var db_folder = __dirname + '/' + test_id + '-db'
-                var meta_folder = __dirname + '/' + test_id + '-meta'
+                var test_id = '/test-' + Math.random().toString(36).slice(2)
 
-                var bb = braid_blob.create_braid_blob()
-                bb.db_folder = db_folder
-                bb.meta_folder = meta_folder
+                // Put a file
+                await braid_blob.put(test_id, 'hello')
 
-                try {
-                    // Put a file
-                    await bb.put('/test-file', Buffer.from('hello'))
+                // Subscribe to it
+                var got_update = false
+                var ac = new AbortController()
+                await braid_blob.get(test_id, {
+                    signal: ac.signal,
+                    subscribe: (update) => { got_update = true }
+                })
 
-                    // Subscribe to it
-                    var got_update = false
-                    await bb.get('/test-file', {
-                        subscribe: (update) => { got_update = true }
-                    })
+                // Verify subscription exists
+                var has_sub_before = !!braid_blob.key_to_subs[test_id]
 
-                    // Verify subscription exists
-                    var has_sub_before = !!bb.key_to_subs['/test-file']
+                await new Promise(done => setTimeout(done, 30))
+                ac.abort()
+                await new Promise(done => setTimeout(done, 30))
 
-                    // Delete it
-                    await bb.delete('/test-file')
+                // Verify subscription is cleaned up
+                var has_sub_after = !!braid_blob.key_to_subs[test_id]
 
-                    // Verify subscription is cleaned up
-                    var has_sub_after = !!bb.key_to_subs['/test-file']
-
-                    res.end('' + (has_sub_before && !has_sub_after))
-                } catch (e) {
-                    res.end('error: ' + e.message)
-                } finally {
-                    await require('fs').promises.rm(db_folder, { recursive: true, force: true })
-                    await require('fs').promises.rm(meta_folder, { recursive: true, force: true })
-                }
+                res.end('' + (has_sub_before && !has_sub_after))
             })()`
         })
         return await r1.text()
@@ -638,19 +628,6 @@ runTest(
         return '' + received_update
     },
     'false'
-)
-
-runTest(
-    "test that subscribe sends 404 if there is no file.",
-    async () => {
-        var key = 'test-' + Math.random().toString(36).slice(2)
-
-        var r = await braid_fetch(`/${key}`, {
-            subscribe: true,
-        })
-        return r.status
-    },
-    '404'
 )
 
 runTest(
@@ -1072,8 +1049,7 @@ runTest(
             method: 'POST',
             body: `void (async () => {
                 try {
-                    var braid_blob = require(\`\${__dirname}/../index.js\`)
-                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '${remote_key}')
+                    var remote_url = new URL('http://localhost:' + port + '${remote_key}')
 
                     // Start sync with URL as first argument (should swap internally)
                     braid_blob.sync(remote_url, '${local_key}')
@@ -1165,10 +1141,8 @@ runTest(
             method: 'POST',
             body: `void (async () => {
                 try {
-                    var braid_blob = require(\`\${__dirname}/../index.js\`)
-
                     // Put locally with SAME version - so when sync connects, no updates need to flow
-                    await braid_blob.put('${local_key}', Buffer.from('same content'), { version: ['same-version-123'] })
+                    await braid_blob.put('${local_key}', 'same content', { version: ['same-version-123'] })
 
                     // Wrap db.read to count calls for our specific key
                     var read_count = 0
@@ -1178,7 +1152,7 @@ runTest(
                         return original_read.call(this, key)
                     }
 
-                    var remote_url = new URL('http://localhost:' + req.socket.localPort + '/${remote_key}')
+                    var remote_url = new URL('http://localhost:' + port + '/${remote_key}')
 
                     // Create an AbortController to stop the sync
                     var ac = new AbortController()
@@ -1305,7 +1279,6 @@ runTest(
         // Try to subscribe with parents 200 (newer than what server has)
         // This triggers the "unknown version" error which gets caught and returns 309
         var r = await braid_fetch(`/${key}`, {
-            subscribe: true,
             parents: ['200']
         })
 
@@ -1537,38 +1510,22 @@ runTest(
         var r1 = await braid_fetch(`/eval`, {
             method: 'POST',
             body: `void (async () => {
-                var fs = require('fs').promises
-                var test_id = 'test-abort-get-' + Math.random().toString(36).slice(2)
-                var db_folder = __dirname + '/' + test_id + '-db'
-                var meta_folder = __dirname + '/' + test_id + '-meta'
+                var test_id = '/test-abort-get-' + Math.random().toString(36).slice(2)
 
-                try {
-                    var bb = braid_blob.create_braid_blob()
-                    bb.db_folder = db_folder
-                    bb.meta_folder = meta_folder
+                // Put a file first
+                await braid_blob.put(test_id, 'hello', { version: ['1'] })
 
-                    // Put a file first
-                    await bb.put('/test-file', Buffer.from('hello'), { version: ['1'] })
+                // Create an already-aborted signal
+                var ac = new AbortController()
+                ac.abort()
 
-                    // Create an already-aborted signal
-                    var ac = new AbortController()
-                    ac.abort()
+                // Try to get with aborted signal (after header_cb)
+                var result = await braid_blob.get(test_id, {
+                    signal: ac.signal,
+                })
 
-                    // Try to get with aborted signal (after header_cb)
-                    var header_called = false
-                    var result = await bb.get('/test-file', {
-                        signal: ac.signal,
-                        header_cb: () => { header_called = true }
-                    })
-
-                    // Result should be undefined since operation was aborted after header_cb
-                    res.end(header_called && result === undefined ? 'aborted' : 'not aborted: header=' + header_called + ' result=' + JSON.stringify(result))
-                } catch (e) {
-                    res.end('error: ' + e.message)
-                } finally {
-                    await fs.rm(db_folder, { recursive: true, force: true })
-                    await fs.rm(meta_folder, { recursive: true, force: true })
-                }
+                // Result should be undefined since operation was aborted already
+                res.end(result === undefined ? 'aborted' : 'not aborted')
             })()`
         })
         return await r1.text()
