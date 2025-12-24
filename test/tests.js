@@ -1635,6 +1635,170 @@ runTest(
     'stopped'
 )
 
+runTest(
+    "test options.db in put writes to custom db",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-custom-db-put-' + Math.random().toString(36).slice(2)
+
+                // Create a simple in-memory db
+                var custom_storage = {}
+                var custom_db = {
+                    read: async (key) => custom_storage[key] || null,
+                    write: async (key, data) => { custom_storage[key] = data },
+                    delete: async (key) => { delete custom_storage[key] }
+                }
+
+                // Put using the custom db
+                await braid_blob.put(test_key, Buffer.from('custom db content'), {
+                    version: ['100'],
+                    db: custom_db
+                })
+
+                // Verify content is in custom db
+                var custom_content = await custom_db.read(test_key)
+                var custom_ok = custom_content && custom_content.toString() === 'custom db content'
+
+                // Verify content is NOT in the default db
+                var default_content = await braid_blob.db.read(test_key)
+                var default_empty = default_content === null
+
+                res.end(custom_ok && default_empty ? 'true' :
+                    'custom_ok=' + custom_ok + ', default_empty=' + default_empty)
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test options.db in get reads from custom db",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-custom-db-get-' + Math.random().toString(36).slice(2)
+
+                // Create a simple in-memory db with some content
+                var custom_storage = {}
+                custom_storage[test_key] = Buffer.from('from custom db')
+                var custom_db = {
+                    read: async (key) => custom_storage[key] || null,
+                    write: async (key, data) => { custom_storage[key] = data },
+                    delete: async (key) => { delete custom_storage[key] }
+                }
+
+                // Put with skip_write to just create meta
+                await braid_blob.put(test_key, Buffer.from('ignored'), {
+                    version: ['200'],
+                    skip_write: true
+                })
+
+                // Get using the custom db - should read from custom db
+                var result = await braid_blob.get(test_key, { db: custom_db })
+
+                res.end(result && result.body.toString() === 'from custom db' ? 'true' :
+                    'got: ' + (result ? result.body.toString() : 'null'))
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test options.db in delete deletes from custom db",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-custom-db-delete-' + Math.random().toString(36).slice(2)
+
+                // Create a simple in-memory db
+                var custom_storage = {}
+                custom_storage[test_key] = Buffer.from('custom content')
+                var custom_db = {
+                    read: async (key) => custom_storage[key] || null,
+                    write: async (key, data) => { custom_storage[key] = data },
+                    delete: async (key) => { delete custom_storage[key] }
+                }
+
+                // Also put to default db
+                await braid_blob.put(test_key, Buffer.from('default content'), {
+                    version: ['300']
+                })
+
+                // Delete using custom db - should only delete from custom db
+                await braid_blob.delete(test_key, { db: custom_db })
+
+                // Verify custom db content is gone
+                var custom_content = await custom_db.read(test_key)
+                var custom_deleted = custom_content === null
+
+                // Verify default db content still exists
+                var default_content = await braid_blob.db.read(test_key)
+                var default_exists = default_content && default_content.toString() === 'default content'
+
+                res.end(custom_deleted && default_exists ? 'true' :
+                    'custom_deleted=' + custom_deleted + ', default_exists=' + default_exists)
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test options.db in get subscribe uses custom db for initial update",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-custom-db-sub-' + Math.random().toString(36).slice(2)
+
+                // Create a simple in-memory db with content
+                var custom_storage = {}
+                custom_storage[test_key] = Buffer.from('subscribe custom content')
+                var custom_db = {
+                    read: async (key) => custom_storage[key] || null,
+                    write: async (key, data) => { custom_storage[key] = data },
+                    delete: async (key) => { delete custom_storage[key] }
+                }
+
+                // Create meta with version using skip_write
+                await braid_blob.put(test_key, Buffer.from('ignored'), {
+                    version: ['400'],
+                    skip_write: true
+                })
+
+                // Subscribe using custom db - initial update should come from custom db
+                var ac = new AbortController()
+                var received_content = null
+
+                await braid_blob.get(test_key, {
+                    db: custom_db,
+                    signal: ac.signal,
+                    subscribe: (update) => {
+                        received_content = update.body.toString()
+                    }
+                })
+
+                // Wait for update
+                await new Promise(done => setTimeout(done, 50))
+                ac.abort()
+
+                res.end(received_content === 'subscribe custom content' ? 'true' :
+                    'got: ' + received_content)
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
 }
 
 // Export for Node.js (CommonJS)

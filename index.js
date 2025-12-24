@@ -126,7 +126,7 @@ function create_braid_blob() {
                 meta.event = their_e
 
                 if (!options.skip_write)
-                    await braid_blob.db.write(key, body)
+                    await (options.db || braid_blob.db).write(key, body)
                 if (options.signal?.aborted) return
 
                 if (options.content_type)
@@ -254,12 +254,12 @@ function create_braid_blob() {
                 // Send an immediate update if needed
                 if (compare_events(result.version?.[0], options.parents?.[0]) > 0) {
                     result.sent = true
-                    result.body = await braid_blob.db.read(key)
+                    result.body = await (options.db || braid_blob.db).read(key)
                     options.my_subscribe(result)
                 }
             } else {
                 // If not subscribe, send the body now
-                result.body = await braid_blob.db.read(key)
+                result.body = await (options.db || braid_blob.db).read(key)
             }
 
             return result
@@ -294,7 +294,7 @@ function create_braid_blob() {
             var meta = await get_meta(key)
             if (options.signal?.aborted) return
 
-            await braid_blob.db.delete(key)
+            await (options.db || braid_blob.db).delete(key)
             await delete_meta(key)
 
             // Notify all subscriptions of the delete

@@ -54,11 +54,6 @@ DEPENDENCY_UPDATES:
   - Format: "updates to {package}@{version}"
   - Example: "0.0.18 - ... updates to url-file-db 0.0.8"
 
-RESOLVED_ISSUES:
-  - url-file-db < 0.0.13: Bug where reading non-existent files returned "index" file contents
-    - Fixed in url-file-db 0.0.13+ (properly returns null for non-existent files)
-    - Caused "test sync local to remote" to fail with unexpected "shared content"
-    - url-file-db 0.0.15+ also relaxed path requirements (no longer requires leading "/")
 ```
 
 ## MODULE_STRUCTURE
@@ -67,7 +62,7 @@ RESOLVED_ISSUES:
 EXPORT: create_braid_blob() -> braid_blob_instance
 MODULE_TYPE: CommonJS
 MAIN_ENTRY: index.js
-DEPENDENCIES: [braid-http, url-file-db, fs, path]
+DEPENDENCIES: [braid-http, fs]
 ```
 
 ## DATA_MODEL
@@ -81,9 +76,9 @@ braid_blob_instance = {
 
   // Runtime state
   cache: object                                   // internal cache
+  meta_cache: object                              // metadata cache
   key_to_subs: Map<key, Map<peer, subscription>> // subscription tracking
-  db: url_file_db_instance                        // blob storage backend
-  meta_db: url_file_db_instance                   // metadata storage backend
+  db: {read, write, delete}                       // blob storage backend (auto-created or custom)
 
   // Methods
   init: async () -> void
@@ -130,6 +125,7 @@ INPUT:
     content_type?: string         // MIME type
     peer?: string                 // peer identifier
     skip_write?: boolean          // skip disk write (for external changes)
+    db?: {read, write, delete}    // custom db backend (overrides braid_blob.db)
     signal?: AbortSignal          // for URL mode
     headers?: object              // for URL mode
   }
@@ -137,8 +133,8 @@ INPUT:
 OUTPUT: version_string
 
 SIDE_EFFECTS:
-  - Writes blob to db_folder via url-file-db
-  - Writes metadata to meta_folder/db
+  - Writes blob to db (options.db or braid_blob.db)
+  - Writes metadata to meta_folder
   - Notifies active subscriptions (except originating peer)
   - If key instanceof URL: makes remote HTTP PUT via braid_fetch
 
@@ -163,6 +159,7 @@ INPUT:
     parents?: [version]           // fork-point for subscriptions
     version?: [version]           // request specific version
     peer?: string                 // peer identifier
+    db?: {read, write, delete}    // custom db backend (overrides braid_blob.db)
     signal?: AbortSignal          // for URL mode
     dont_retry?: boolean          // for URL mode subscriptions
   }
@@ -294,14 +291,11 @@ isAcceptable(contentType, acceptHeader) -> boolean
 
 ```
 db_folder/
-  {url_file_db structure}
-  - Blob data stored via url-file-db
-  - Key mapping: URL-safe encoding of keys
+  {encoded_key}       # Blob data files
+  - Key encoding: encode_filename() escapes special chars
 
 meta_folder/
-  peer.txt          # Peer ID (auto-generated if missing)
-  db/               # url-file-db for metadata
-    {encoded_key}.txt  # JSON: {event: version, content_type: mime}
+  {encoded_key}       # JSON metadata files: {event: version, content_type: mime}
 ```
 
 ## PROTOCOL_DETAILS
@@ -344,8 +338,8 @@ BRAID_UPDATE_FORMAT:
 INITIALIZATION:
   - init() called lazily by put/get/serve
   - init() runs once (subsequent calls return same promise)
-  - Creates db and meta_db url-file-db instances
-  - Loads or generates peer ID
+  - Creates db object with read/write/delete methods (or uses provided db_folder object)
+  - Generates peer ID if not set
 
 SUBSCRIPTION_MANAGEMENT:
   - key_to_subs: Map<string, Map<string, {sendUpdate}>>
@@ -353,11 +347,6 @@ SUBSCRIPTION_MANAGEMENT:
   - Inner key: peer identifier
   - Prevents echo: put() doesn't notify originating peer
   - Serialized updates: subscribe_chain ensures sequential callback execution
-
-FILE_WATCHING:
-  - url-file-db monitors db_folder for external changes
-  - External changes trigger put() with skip_write: true
-  - Subscriptions notified of external changes
 
 CONCURRENCY_CONTROL:
   - within_fiber(key, fn) serializes operations per key
@@ -413,14 +402,6 @@ braid-http:
   - http_server (braidify): Adds Braid protocol support to Node.js HTTP
   - fetch (braid_fetch): Braid-aware fetch implementation
   - Handles: Subscribe headers, Version headers, streaming updates
-
-url-file-db (^0.0.15):
-  - Bidirectional URL ↔ filesystem mapping
-  - Collision-resistant encoding (case-insensitive filesystem safe)
-  - File watching for external changes
-  - Separate instances for blobs (db) and metadata (meta_db)
-  - API change in 0.0.15: use get_canonical_path() instead of url_path_to_canonical_path()
-  - Fixed in 0.0.13+: properly returns null for non-existent files (not "index" content)
 ```
 
 ## ERROR_CONDITIONS
@@ -455,7 +436,7 @@ TEST_RUNNER: test/test.js
   - Browser mode: Opens puppeteer, loads test.html
 
 TEST_SUITE: test/tests.js
-  - 40+ test cases covering:
+  - 50+ test cases covering:
     - Basic put/get operations
     - Subscriptions and updates
     - Version conflict resolution
