@@ -11,6 +11,8 @@ function create_braid_blob() {
         db: null // object with read/write/delete methods
     }
 
+    var temp_folder = null // will be set in init
+
     braid_blob.init = async () => {
         // We only want to initialize once
         var init_p = real_init()
@@ -20,6 +22,15 @@ function create_braid_blob() {
         async function real_init() {
             // Ensure our meta folder exists
             await require('fs').promises.mkdir(braid_blob.meta_folder, { recursive: true })
+
+            // Create a temp folder inside the meta folder for writing temp files,
+            // for atomic writing.
+            // The temp folder is called "temp",
+            // And this is guaranteed not to conflict with any other files,
+            // because other files are the result of encode_filename,
+            // which always ends with a ".XX" (for handling insensitive filesystems)
+            temp_folder = `${braid_blob.meta_folder}/temp`
+            await require('fs').promises.mkdir(temp_folder, { recursive: true })
 
             // Set up db - either use provided object or create file-based storage
             if (typeof braid_blob.db_folder === 'string') {
@@ -36,7 +47,7 @@ function create_braid_blob() {
                     },
                     write: async (key, data) => {
                         var file_path = `${braid_blob.db_folder}/${encode_filename(key)}`
-                        await require('fs').promises.writeFile(file_path, data)
+                        await atomic_write(file_path, data, temp_folder)
                     },
                     delete: async (key) => {
                         var file_path = `${braid_blob.db_folder}/${encode_filename(key)}`
@@ -74,9 +85,8 @@ function create_braid_blob() {
     }
 
     async function save_meta(key) {
-        await require('fs').promises.writeFile(
-            `${braid_blob.meta_folder}/${encode_filename(key)}`,
-            JSON.stringify(braid_blob.meta_cache[key]))
+        await atomic_write(`${braid_blob.meta_folder}/${encode_filename(key)}`,
+            JSON.stringify(braid_blob.meta_cache[key]), temp_folder)
     }
 
     async function delete_meta(key) {
@@ -731,6 +741,12 @@ function create_braid_blob() {
             normalized.parents = JSON.parse('[' + normalized.parents + ']')
 
         return normalized
+    }
+
+    async function atomic_write(final_destination, data, temp_folder) {
+        var temp = `${temp_folder}/${Math.random().toString(36).slice(2)}`
+        await require('fs').promises.writeFile(temp, data)
+        await require('fs').promises.rename(temp, final_destination)
     }
 
     braid_blob.create_braid_blob = create_braid_blob

@@ -1799,6 +1799,212 @@ runTest(
     'true'
 )
 
+runTest(
+    "test atomic write creates temp folder on init",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-atomic-init-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Initialize
+                    await bb.init()
+
+                    // Check that temp folder exists inside meta folder
+                    var temp_folder = meta_folder + '/temp'
+                    var stat = await fs.stat(temp_folder)
+                    var is_dir = stat.isDirectory()
+
+                    res.end(is_dir ? 'true' : 'not a directory')
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test atomic write leaves no temp files after successful write",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-atomic-cleanup-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Do a write
+                    await bb.put('/test-file', Buffer.from('hello'), { version: ['1'] })
+
+                    // Check that temp folder is empty (no leftover temp files)
+                    var temp_folder = meta_folder + '/temp'
+                    var files = await fs.readdir(temp_folder)
+
+                    res.end(files.length === 0 ? 'true' : 'leftover files: ' + files.join(', '))
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test atomic write data file integrity",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-atomic-integrity-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Write initial content
+                    await bb.put('/test-file', Buffer.from('initial content'), { version: ['1'] })
+
+                    // Verify we can read it back correctly
+                    var result = await bb.get('/test-file')
+                    var content = result.body.toString()
+
+                    res.end(content === 'initial content' ? 'true' : 'wrong content: ' + content)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test atomic write - multiple rapid writes preserve last value",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-atomic-rapid-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Do multiple rapid writes
+                    await bb.put('/test-file', Buffer.from('write1'), { version: ['1'] })
+                    await bb.put('/test-file', Buffer.from('write2'), { version: ['2'] })
+                    await bb.put('/test-file', Buffer.from('write3'), { version: ['3'] })
+
+                    // Verify last write won
+                    var result = await bb.get('/test-file')
+                    var content = result.body.toString()
+                    var version = result.version[0]
+
+                    // Also verify temp folder is clean
+                    var temp_folder = meta_folder + '/temp'
+                    var files = await fs.readdir(temp_folder)
+
+                    res.end(content === 'write3' && version === '3' && files.length === 0 ? 'true' :
+                        'content=' + content + ', version=' + version + ', temp_files=' + files.length)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
+    "test atomic write - meta file is also written atomically",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-atomic-meta-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                try {
+                    var bb = braid_blob.create_braid_blob()
+                    bb.db_folder = db_folder
+                    bb.meta_folder = meta_folder
+
+                    // Write with content_type to test meta file
+                    await bb.put('/test-file', Buffer.from('content'), {
+                        version: ['test-version'],
+                        content_type: 'text/plain'
+                    })
+
+                    // Create new instance to read from disk (not cache)
+                    var bb2 = braid_blob.create_braid_blob()
+                    bb2.db_folder = db_folder
+                    bb2.meta_folder = meta_folder
+
+                    var result = await bb2.get('/test-file')
+
+                    // Verify both version and content_type are correctly persisted
+                    var version_ok = result.version[0] === 'test-version'
+                    var ct_ok = result.content_type === 'text/plain'
+
+                    res.end(version_ok && ct_ok ? 'true' :
+                        'version_ok=' + version_ok + ', ct_ok=' + ct_ok +
+                        ', version=' + result.version[0] + ', ct=' + result.content_type)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
 }
 
 // Export for Node.js (CommonJS)
