@@ -452,18 +452,22 @@ function create_braid_blob() {
                 let swap = a; a = b; b = swap
             }
 
-            var ac = new AbortController()
-            options.signal?.addEventListener('abort', () => ac.abort())
+            var ac = null
+            options.signal?.addEventListener('abort', () => ac?.abort())
 
             function handle_error(e) {
-                if (ac.signal.aborted) return
+                if (options.signal?.aborted) return
                 console.log(`disconnected, retrying in 1 second`)
                 setTimeout(connect, 1000)
             }
 
             async function connect() {
-                if (ac.signal.aborted) return
+                if (options.signal?.aborted) return
                 if (options.on_pre_connect) await options.on_pre_connect()
+
+                // Abort stuff in the previous connect
+                ac?.abort()
+                ac = new AbortController()
 
                 try {
                     // Check if remote has our current version (simple fork-point check)

@@ -2005,6 +2005,50 @@ runTest(
     'true'
 )
 
+runTest(
+    "test sync abort stops retry after error",
+    async () => {
+        var local_key = 'test-sync-abort-retry-' + Math.random().toString(36).slice(2)
+
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                try {
+                    var braid_blob = require(\`\${__dirname}/../index.js\`)
+
+                    // Use unreachable URL to trigger errors (RFC 5737 TEST-NET-1, guaranteed not routable)
+                    var remote_url = new URL('http://192.0.2.1:12345/unreachable')
+
+                    var connect_count = 0
+                    var ac = new AbortController()
+
+                    // Start sync - will fail and try to reconnect
+                    braid_blob.sync('${local_key}', remote_url, {
+                        signal: ac.signal,
+                        on_pre_connect: () => {
+                            connect_count++
+                            // Abort after first connect attempt
+                            if (connect_count === 1) {
+                                setTimeout(() => ac.abort(), 50)
+                            }
+                        }
+                    })
+
+                    // Wait long enough for potential retries (retry is 1 second)
+                    await new Promise(done => setTimeout(done, 1500))
+
+                    // Should only have 1 connect attempt since we aborted
+                    res.end(connect_count === 1 ? 'true' : 'connect_count=' + connect_count)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
 }
 
 // Export for Node.js (CommonJS)
