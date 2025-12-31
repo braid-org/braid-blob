@@ -457,7 +457,7 @@ function create_braid_blob() {
 
             function handle_error(e) {
                 if (options.signal?.aborted) return
-                console.log(`disconnected, retrying in 1 second`)
+                console.log(`disconnected from ${b.href}, retrying in 1 second`)
                 setTimeout(connect, 1000)
             }
 
