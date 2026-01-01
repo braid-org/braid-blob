@@ -754,6 +754,7 @@ function create_braid_blob() {
     }
 
     braid_blob.create_braid_blob = create_braid_blob
+    braid_blob.braid_fetch = braid_fetch
 
     return braid_blob
 }
