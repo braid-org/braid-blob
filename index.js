@@ -732,7 +732,7 @@ function create_braid_blob() {
             for (var [k, v] of (options.headers instanceof Headers ?
                 options.headers.entries() :
                 Object.entries(options.headers))) {
-                var s = normalize_options.special[k]
+                var s = normalize_options.special[k.toLowerCase()]
                 if (s) normalized[s] = v
                 else normalized.headers[k] = v
             }

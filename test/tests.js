@@ -2006,6 +2006,58 @@ runTest(
 )
 
 runTest(
+    "test that headers with different casing are normalized correctly",
+    async () => {
+        // This test verifies that normalize_options correctly lowercases header keys
+        // when extracting special headers. Without the fix, "Parents" wouldn't match
+        // "parents" in the special keys lookup, so it wouldn't be extracted.
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                // Get a reference to normalize_options by creating a fresh braid_blob
+                var bb = braid_blob.create_braid_blob()
+
+                // Access the normalize_options function through the module internals
+                // We'll test it indirectly through the options processing in put/get
+                var test_key = '/test-header-case-' + Math.random().toString(36).slice(2)
+
+                // Put some content first
+                await braid_blob.put(test_key, Buffer.from('v1'), { version: ['1'] })
+
+                // Now call get with uppercase "Parents" header key
+                // Without the toLowerCase() fix, "Parents" wouldn't be recognized
+                // and wouldn't be extracted to normalized.parents
+
+                // The parents option affects whether subscribe sends an immediate update
+                // If parents=['1'] (same as current version), no update is sent
+                // If parents is not set or recognized, update IS sent
+
+                var got_immediate = false
+                var ac = new AbortController()
+                await braid_blob.get(test_key, {
+                    signal: ac.signal,
+                    headers: { 'Parents': '"1"' },  // Uppercase "Parents" key
+                    subscribe: (update) => {
+                        got_immediate = true
+                    }
+                })
+
+                // Wait a bit for potential update
+                await new Promise(done => setTimeout(done, 100))
+                ac.abort()
+
+                // If Parents was correctly normalized, got_immediate should be false
+                // (because parents='1' equals current version, so no update needed)
+                // If Parents was NOT normalized (bug case), got_immediate would be true
+                res.end(got_immediate ? 'got update (bug)' : 'no update (correct)')
+            })()`
+        })
+        return await r1.text()
+    },
+    'no update (correct)'
+)
+
+runTest(
     "test sync abort stops retry after error",
     async () => {
         var local_key = 'test-sync-abort-retry-' + Math.random().toString(36).slice(2)
