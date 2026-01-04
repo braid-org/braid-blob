@@ -8,7 +8,8 @@ function create_braid_blob() {
         meta_cache: {},
         key_to_subs: {},
         peer: null, // will be auto-generated if not set by the user
-        db: null // object with read/write/delete methods
+        db: null, // object with read/write/delete methods
+        reconnect_delay_ms: 1000,
     }
 
     var temp_folder = null // will be set in init
@@ -458,7 +459,7 @@ function create_braid_blob() {
             function handle_error(e) {
                 if (options.signal?.aborted) return
                 console.log(`disconnected from ${b.href}, retrying in 1 second`)
-                setTimeout(connect, 1000)
+                setTimeout(connect, braid_blob.reconnect_delay_ms ?? 1000)
             }
 
             async function connect() {
