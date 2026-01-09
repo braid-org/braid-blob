@@ -29,91 +29,83 @@ function create_braid_blob() {
             let swap = a; a = b; b = swap
         }
 
-        var ac = null
-        options.signal?.addEventListener('abort', () => ac?.abort())
-
-        function handle_error(e) {
-            if (options.signal?.aborted) return
-            console.log(`disconnected from ${b.href}, retrying in ${braid_blob.reconnect_delay_ms ?? 1000}ms`)
-            setTimeout(connect, braid_blob.reconnect_delay_ms ?? 1000)
-        }
-
-        async function connect() {
-            if (options.signal?.aborted) return
+        reconnector(options.signal, (_e, count) => {
+            var delay = braid_blob.reconnect_delay_ms ?? Math.min(count, 3) * 1000
+            console.log(`disconnected from ${b.href}, retrying in ${delay}ms`)
+            return delay
+        }, async (signal, handle_error) => {
+            if (signal.aborted) return
             if (options.on_pre_connect) await options.on_pre_connect()
-
-            // Abort stuff in the previous connect
-            ac?.abort()
-            ac = new AbortController()
 
             try {
                 // Check if remote has our current version (simple fork-point check)
                 var server_has_our_version = false
                 var local_version = (await braid_blob.get(a, {
                     ...options,
-                    signal: ac.signal,
+                    signal,
                     head: true
                 }))?.version
+                if (signal.aborted) return
                 if (local_version) {
                     var r = await braid_blob.get(b, {
                         ...options,
-                        signal: ac.signal,
+                        signal,
                         head: true,
                         dont_retry: true,
                         version: local_version,
                     })
+                    if (signal.aborted) return
                     server_has_our_version = !!r
                 }
 
                 // Local -> remote
                 await braid_blob.get(a, {
                     ...options,
-                    signal: ac.signal,
+                    signal,
                     parents: server_has_our_version ? local_version : null,
                     subscribe: async update => {
                         try {
                             if (update.delete) {
                                 var x = await braid_blob.delete(b, {
                                     ...options,
-                                    signal: ac.signal,
+                                    signal,
                                     dont_retry: true,
                                     content_type: update.content_type,
                                 })
+                                if (signal.aborted) return
                                 if (!x.ok) handle_error(new Error('failed to delete'))
                             } else {
                                 var x = await braid_blob.put(b, update.body, {
                                     ...options,
-                                    signal: ac.signal,
+                                    signal,
                                     dont_retry: true,
                                     version: update.version,
                                     content_type: update.content_type,
                                 })
+                                if (signal.aborted) return
                                 if ((x.status === 401 || x.status === 403) && options.on_unauthorized) {
                                     await options.on_unauthorized?.()
                                 } else if (!x.ok) handle_error(new Error('failed to PUT: ' + x.status))
                             }
-                        } catch (e) {
-                            if (e.name !== 'AbortError')
-                                handle_error(e)
-                        }
+                        } catch (e) { handle_error(e) }
                     }
                 })
 
                 // Remote -> local
                 var remote_res = await braid_blob.get(b, {
                     ...options,
-                    signal: ac.signal,
+                    signal,
                     dont_retry: true,
                     parents: local_version,
                     subscribe: async update => {
                         if (update.delete) await braid_blob.delete(a, {
                             ...options,
-                            signal: ac.signal,
+                            signal,
                             content_type: update.content_type,
                         })
                         else await braid_blob.put(a, update.body, {
                             ...options,
-                            signal: ac.signal,
+                            signal,
                             version: update.version,
                             content_type: update.content_type,
                         })
@@ -124,11 +116,8 @@ function create_braid_blob() {
                     }
                 })
                 options.on_res?.(remote_res)
-            } catch (e) {
-                handle_error(e)
-            }
-        }
-        connect()
+            } catch (e) { handle_error(e) }
+        })
     }
 
     braid_blob.serve = async (req, res, options = {}) => {
@@ -718,6 +707,37 @@ function create_braid_blob() {
         var temp = `${temp_folder}/${Math.random().toString(36).slice(2)}`
         await require('fs').promises.writeFile(temp, data)
         await require('fs').promises.rename(temp, final_destination)
+    }
+
+    // Calls func(inner_signal, reconnect) immediately and handles reconnection.
+    // - inner_signal: AbortSignal that aborts when reconnect() is called or outter_signal aborts
+    // - reconnect(error): call this to trigger a reconnection after get_delay(error, count) ms
+    // - Multiple/rapid reconnect() calls are safe - only one reconnection will be scheduled
+    // - If outter_signal aborts, no further calls to func will occur
+    function reconnector(outter_signal, get_delay, func) {
+        if (outter_signal?.aborted) return
+
+        var current_inner_ac = null
+        outter_signal?.addEventListener('abort', () =>
+            current_inner_ac?.abort())
+
+        var reconnect_count = 0
+        connect()
+        function connect() {
+            if (outter_signal?.aborted) return
+
+            var ac = current_inner_ac = new AbortController()
+            var inner_signal = ac.signal
+
+            func(inner_signal, (e) => {
+                if (outter_signal?.aborted ||
+                    inner_signal.aborted) return
+
+                ac.abort()
+                var delay = get_delay(e, ++reconnect_count)
+                setTimeout(connect, delay)
+            })
+        }
     }
 
     braid_blob.create_braid_blob = create_braid_blob
