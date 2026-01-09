@@ -1,6 +1,6 @@
 {
   "name": "braid-blob",
-  "version": "0.0.49",
+  "version": "0.0.50",
   "description": "Library for collaborative blobs over http using braid.",
   "author": "Braid Working Group",
   "repository": "braid-org/braid-blob",
