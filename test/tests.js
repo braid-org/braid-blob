@@ -996,7 +996,7 @@ runTest(
 )
 
 runTest(
-    "test sync two local keys",
+    "test sync two local keys throws error",
     async () => {
         var key1 = '/test-sync-local1-' + Math.random().toString(36).slice(2)
         var key2 = '/test-sync-local2-' + Math.random().toString(36).slice(2)
@@ -1007,29 +1007,18 @@ runTest(
                 try {
                     var braid_blob = require(\`\${__dirname}/../index.js\`)
 
-                    // Put something to first key
-                    await braid_blob.put('${key1}', Buffer.from('sync local content'), { version: ['700'] })
-
-                    // Start sync between two local keys
+                    // Try to sync between two local keys - should throw
                     braid_blob.sync('${key1}', '${key2}')
 
-                    res.end('syncing')
+                    res.end('no error thrown')
                 } catch (e) {
-                    res.end('error: ' + e.message + ' ' + e.stack)
+                    res.end('error thrown')
                 }
             })()`
         })
-        var result = await r1.text()
-        if (result.startsWith('error:')) return result
-
-        // Wait a bit for sync to happen
-        await new Promise(done => setTimeout(done, 100))
-
-        // Check second key has the content
-        var r = await braid_fetch(`${key2}`)
-        return await r.text()
+        return await r1.text()
     },
-    'sync local content'
+    'error thrown'
 )
 
 runTest(

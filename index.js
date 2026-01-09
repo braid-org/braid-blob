@@ -18,142 +18,117 @@ function create_braid_blob() {
         options = normalize_options(options)
         if (!options.peer) options.peer = Math.random().toString(36).slice(2)
 
-        if ((a instanceof URL) === (b instanceof URL)) {
-            braid_blob.get(a, {
-                ...options,
-                subscribe: async update => {
-                    if (update.delete) await braid_blob.delete(b, {
-                        ...options,
-                        content_type: update.content_type,
-                    })
-                    else await braid_blob.put(b, update.body, {
-                        ...options,
-                        version: update.version,
-                        content_type: update.content_type,
-                    })
-                }
-            })
-            braid_blob.get(b, {
-                ...options,
-                subscribe: async update => {
-                    if (update.delete) await braid_blob.delete(a, {
-                        ...options,
-                        content_type: update.content_type,
-                    })
-                    else await braid_blob.put(a, update.body, {
-                        ...options,
-                        version: update.version,
-                        content_type: update.content_type,
-                    })
-                }
-            })
-        } else {
-            // One is local, one is remote - make a=local and b=remote (swap if not)
-            if (a instanceof URL) {
-                let swap = a; a = b; b = swap
-            }
+        // Support for same-type params removed for now,
+        // since it is unused, unoptimized,
+        // and not as well battle tested
+        if ((a instanceof URL) === (b instanceof URL))
+            throw new Error(`one parameter should be local string key, and the other a remote URL object`)
 
-            var ac = null
-            options.signal?.addEventListener('abort', () => ac?.abort())
+        // One is local, one is remote - make a=local and b=remote (swap if not)
+        if (a instanceof URL) {
+            let swap = a; a = b; b = swap
+        }
 
-            function handle_error(e) {
-                if (options.signal?.aborted) return
-                console.log(`disconnected from ${b.href}, retrying in ${braid_blob.reconnect_delay_ms ?? 1000}ms`)
-                setTimeout(connect, braid_blob.reconnect_delay_ms ?? 1000)
-            }
+        var ac = null
+        options.signal?.addEventListener('abort', () => ac?.abort())
 
-            async function connect() {
-                if (options.signal?.aborted) return
-                if (options.on_pre_connect) await options.on_pre_connect()
+        function handle_error(e) {
+            if (options.signal?.aborted) return
+            console.log(`disconnected from ${b.href}, retrying in ${braid_blob.reconnect_delay_ms ?? 1000}ms`)
+            setTimeout(connect, braid_blob.reconnect_delay_ms ?? 1000)
+        }
 
-                // Abort stuff in the previous connect
-                ac?.abort()
-                ac = new AbortController()
+        async function connect() {
+            if (options.signal?.aborted) return
+            if (options.on_pre_connect) await options.on_pre_connect()
 
-                try {
-                    // Check if remote has our current version (simple fork-point check)
-                    var server_has_our_version = false
-                    var local_version = (await braid_blob.get(a, {
+            // Abort stuff in the previous connect
+            ac?.abort()
+            ac = new AbortController()
+
+            try {
+                // Check if remote has our current version (simple fork-point check)
+                var server_has_our_version = false
+                var local_version = (await braid_blob.get(a, {
+                    ...options,
+                    signal: ac.signal,
+                    head: true
+                }))?.version
+                if (local_version) {
+                    var r = await braid_blob.get(b, {
                         ...options,
                         signal: ac.signal,
-                        head: true
-                    }))?.version
-                    if (local_version) {
-                        var r = await braid_blob.get(b, {
+                        head: true,
+                        dont_retry: true,
+                        version: local_version,
+                    })
+                    server_has_our_version = !!r
+                }
+
+                // Local -> remote
+                await braid_blob.get(a, {
+                    ...options,
+                    signal: ac.signal,
+                    parents: server_has_our_version ? local_version : null,
+                    subscribe: async update => {
+                        try {
+                            if (update.delete) {
+                                var x = await braid_blob.delete(b, {
+                                    ...options,
+                                    signal: ac.signal,
+                                    dont_retry: true,
+                                    content_type: update.content_type,
+                                })
+                                if (!x.ok) handle_error(new Error('failed to delete'))
+                            } else {
+                                var x = await braid_blob.put(b, update.body, {
+                                    ...options,
+                                    signal: ac.signal,
+                                    dont_retry: true,
+                                    version: update.version,
+                                    content_type: update.content_type,
+                                })
+                                if ((x.status === 401 || x.status === 403) && options.on_unauthorized) {
+                                    await options.on_unauthorized?.()
+                                } else if (!x.ok) handle_error(new Error('failed to PUT: ' + x.status))
+                            }
+                        } catch (e) {
+                            if (e.name !== 'AbortError')
+                                handle_error(e)
+                        }
+                    }
+                })
+
+                // Remote -> local
+                var remote_res = await braid_blob.get(b, {
+                    ...options,
+                    signal: ac.signal,
+                    dont_retry: true,
+                    parents: local_version,
+                    subscribe: async update => {
+                        if (update.delete) await braid_blob.delete(a, {
                             ...options,
                             signal: ac.signal,
-                            head: true,
-                            dont_retry: true,
-                            version: local_version,
+                            content_type: update.content_type,
                         })
-                        server_has_our_version = !!r
+                        else await braid_blob.put(a, update.body, {
+                            ...options,
+                            signal: ac.signal,
+                            version: update.version,
+                            content_type: update.content_type,
+                        })
+                    },
+                    on_error: e => {
+                        options.on_disconnect?.()
+                        handle_error(e)
                     }
-
-                    // Local -> remote
-                    await braid_blob.get(a, {
-                        ...options,
-                        signal: ac.signal,
-                        parents: server_has_our_version ? local_version : null,
-                        subscribe: async update => {
-                            try {
-                                if (update.delete) {
-                                    var x = await braid_blob.delete(b, {
-                                        ...options,
-                                        signal: ac.signal,
-                                        dont_retry: true,
-                                        content_type: update.content_type,
-                                    })
-                                    if (!x.ok) handle_error(new Error('failed to delete'))
-                                } else {
-                                    var x = await braid_blob.put(b, update.body, {
-                                        ...options,
-                                        signal: ac.signal,
-                                        dont_retry: true,
-                                        version: update.version,
-                                        content_type: update.content_type,
-                                    })
-                                    if ((x.status === 401 || x.status === 403) && options.on_unauthorized) {
-                                        await options.on_unauthorized?.()
-                                    } else if (!x.ok) handle_error(new Error('failed to PUT: ' + x.status))
-                                }
-                            } catch (e) {
-                                if (e.name !== 'AbortError')
-                                    handle_error(e)
-                            }
-                        }
-                    })
-
-                    // Remote -> local
-                    var remote_res = await braid_blob.get(b, {
-                        ...options,
-                        signal: ac.signal,
-                        dont_retry: true,
-                        parents: local_version,
-                        subscribe: async update => {
-                            if (update.delete) await braid_blob.delete(a, {
-                                ...options,
-                                signal: ac.signal,
-                                content_type: update.content_type,
-                            })
-                            else await braid_blob.put(a, update.body, {
-                                ...options,
-                                signal: ac.signal,
-                                version: update.version,
-                                content_type: update.content_type,
-                            })
-                        },
-                        on_error: e => {
-                            options.on_disconnect?.()
-                            handle_error(e)
-                        }
-                    })
-                    options.on_res?.(remote_res)
-                } catch (e) {
-                    handle_error(e)
-                }
+                })
+                options.on_res?.(remote_res)
+            } catch (e) {
+                handle_error(e)
             }
-            connect()
         }
+        connect()
     }
 
     braid_blob.serve = async (req, res, options = {}) => {
