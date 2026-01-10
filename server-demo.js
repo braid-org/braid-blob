@@ -23,12 +23,12 @@ var server = require("http").createServer(async (req, res) => {
         return
     }
 
-    if (url === '/' || url === '/index.html') {
+    if (url === '/') {
         res.writeHead(200, {
             "Content-Type": "text/html",
             "Cache-Control": "no-cache"
         })
-        require("fs").createReadStream(`${__dirname}/index.html`).pipe(res)
+        require("fs").createReadStream(`${__dirname}/client-demo.html`).pipe(res)
         return
     }
 
