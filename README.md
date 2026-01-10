@@ -13,10 +13,8 @@ npm install braid-blob
 ### Basic Server
 
 ```javascript
-var braid_blob = require('braid-blob')
-
 require('http').createServer((req, res) => {
-    braid_blob.serve(req, res)
+    require('braid-blob').serve(req, res)
 }).listen(8888)
 ```
 
@@ -75,11 +73,7 @@ Bidirectionally synchronizes a blob between local storage and a remote URL.
 - `url` - Remote URL (URL object)
 - `options` - Optional configuration object
   - `signal` - AbortSignal for cancellation (use to stop sync)
-  - `content_type` / `accept` - Content type for requests
-  - `on_pre_connect` - Async callback before connection attempt
-  - `on_disconnect` - Callback when connection drops
-  - `on_unauthorized` - Callback on 401/403 responses
-  - `on_res` - Callback receiving the response object
+  - `content_type` - Content type for requests
 
 ### `braid_blob.get(key, options)`
 
@@ -88,11 +82,11 @@ Retrieves a blob from local storage or a remote URL.
 **Parameters:**
 - `key` - Local storage key (string) or remote URL (URL object)
 - `options` - Optional configuration object
-  - `version` - Request a specific version
-  - `parents` - Version parents for subscription fork-point
+  - `version` - Version ID to check existence (use with `head: true`)
+  - `parent` - Version ID; when subscribing, only receive updates newer than this
   - `subscribe` - Callback function for real-time updates
   - `head` - If true, returns only metadata (version, content_type) without body
-  - `content_type` / `accept` - Content type for the request
+  - `content_type` - Content type for the request
   - `signal` - AbortSignal for cancellation
 
 **Returns:** `{version, body, content_type}` object, or `null` if not found.
@@ -124,15 +118,15 @@ A simple browser client is included for subscribing to blob updates.
 
 ```html
 <script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
-<script src="/client.js"></script>
+<script src="http://localhost:8888/client.js"></script>
+<img id="image"/>
 <script>
     braid_blob_client('http://localhost:8888/blob.png', {
-        on_update: (blob, content_type, version) => {
-            // Called whenever the blob is updated
-            var url = URL.createObjectURL(new Blob([blob], { type: content_type }))
-            document.getElementById('image').src = url
-        },
-        on_delete: () => console.log('Blob was deleted'),
+        // Called whenever the blob is updated
+        on_update: (blob, content_type, version) =>
+            image.src = URL.createObjectURL(
+                new Blob([blob], { type: content_type })),
+        on_delete: () => image.src = '',
         on_error: (e) => console.error('Error:', e)
     })
 </script>
@@ -147,10 +141,8 @@ Subscribes to a blob endpoint and receives updates.
 - `options` - Configuration object
   - `on_update(blob, content_type, version)` - Callback for updates
   - `on_delete` - Callback when blob is deleted
-  - `on_error` - Callback for errors
-  - `on_res` - Callback receiving the response object
-
-**Returns:** `{ stop }` - Call `stop()` to unsubscribe.
+  - `on_error(e)` - Callback for errors
+  - `signal` - AbortSignal for cancellation
 
 ## Testing
 

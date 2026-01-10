@@ -1,4 +1,4 @@
-var {http_server: braidify, fetch: braid_fetch} = require('braid-http')
+var {http_server: braidify, fetch: braid_fetch, free_cors} = require('braid-http')
 
 function create_braid_blob() {
     var braid_blob = {
@@ -126,6 +126,8 @@ function create_braid_blob() {
             var url = new URL(req.url, 'http://localhost')
             options.key = url.pathname
         }
+
+        free_cors(res)
 
         braidify(req, res)
         if (res.is_multiplexer) return
@@ -757,11 +759,15 @@ function create_braid_blob() {
             }
         }
 
-        // Normalize version/parents strings to arrays
+        // Normalize parent -> parents
+        if (options.parent)
+            normalized.parents = options.parent
+
+        // Normalize version/parents: allow strings, wrap in array for internal use
         if (typeof normalized.version === 'string')
-            normalized.version = JSON.parse('[' + normalized.version + ']')
+            normalized.version = [normalized.version]
         if (typeof normalized.parents === 'string')
-            normalized.parents = JSON.parse('[' + normalized.parents + ']')
+            normalized.parents = [normalized.parents]
 
         return normalized
     }
