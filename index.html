@@ -1,0 +1,146 @@
+<body style="margin: 0; padding: 20px; font-family: sans-serif;">
+    <div id="drop_overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 100, 200, 0.8); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="color: white; font-size: 24px; text-align: center;">
+            <div style="font-size: 48px; margin-bottom: 20px;">Drop file here</div>
+            <div>to upload to <span id="drop_url"></span></div>
+        </div>
+    </div>
+    <h2>Braid Blob Client Demo</h2>
+    <p>
+        <label>URL: <input type="text" id="url_input" style="width: 400px;" /></label>
+    </p>
+    <p>Version: <code id="version_display">-</code></p>
+    <p>Content-Type: <code id="content_type_display">-</code></p>
+    <div id="image_container">
+        <img id="blob_image" style="max-width: 100%; border: 1px solid #ccc;" />
+    </div>
+    <p id="status">Enter a URL and click Connect</p>
+</body>
+<script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
+<script src="/client.js"></script>
+<script>
+    var current_object_url = null
+    var current_client = null
+    var current_blob_url = null
+
+    // Initialize URL input from query parameter, or default to /test_blob
+    var params = new URLSearchParams(location.search)
+    var initial_url = params.get('url') || `${location.origin}/blob.png`
+    document.getElementById('url_input').value = initial_url
+
+    function connect(blob_url) {
+        current_blob_url = blob_url
+        // Stop existing subscription
+        if (current_client) {
+            current_client.stop()
+            current_client = null
+        }
+
+        // Clear previous image
+        if (current_object_url) {
+            URL.revokeObjectURL(current_object_url)
+            current_object_url = null
+        }
+        document.getElementById('blob_image').src = ''
+        document.getElementById('version_display').textContent = '-'
+        document.getElementById('content_type_display').textContent = '-'
+        document.getElementById('status').textContent = 'Connecting...'
+
+        current_client = braid_blob_client(blob_url, {
+            on_update: (blob, content_type, version) => {
+                document.getElementById('status').textContent = ''
+                document.getElementById('version_display').textContent =
+                    version ? JSON.stringify(version) : '-'
+                document.getElementById('content_type_display').textContent =
+                    content_type || '-'
+
+                // Revoke old object URL to free memory
+                if (current_object_url) {
+                    URL.revokeObjectURL(current_object_url)
+                }
+
+                // Create a blob URL from the binary data and display it
+                var image_blob = new Blob([blob], { type: content_type || 'image/png' })
+                current_object_url = URL.createObjectURL(image_blob)
+                document.getElementById('blob_image').src = current_object_url
+            },
+            on_error: (e) => {
+                document.getElementById('status').textContent = 'Connecting...'
+            },
+            on_delete: () => {
+                document.getElementById('status').textContent = 'Blob deleted'
+                document.getElementById('blob_image').src = ''
+                if (current_object_url) {
+                    URL.revokeObjectURL(current_object_url)
+                    current_object_url = null
+                }
+            }
+        })
+    }
+
+    document.getElementById('url_input').onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            var url = document.getElementById('url_input').value.trim()
+            if (url) connect(url)
+        }
+    }
+
+    // Auto-connect on load
+    connect(initial_url)
+
+    // Drag and drop handling
+    var drop_overlay = document.getElementById('drop_overlay')
+    var drag_counter = 0
+
+    document.addEventListener('dragenter', (e) => {
+        e.preventDefault()
+        drag_counter++
+        if (drag_counter === 1) {
+            document.getElementById('drop_url').textContent = current_blob_url || 'the current URL'
+            drop_overlay.style.display = 'flex'
+        }
+    })
+
+    document.addEventListener('dragleave', (e) => {
+        e.preventDefault()
+        drag_counter--
+        if (drag_counter === 0) {
+            drop_overlay.style.display = 'none'
+        }
+    })
+
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault()
+    })
+
+    document.addEventListener('drop', async (e) => {
+        e.preventDefault()
+        drag_counter = 0
+        drop_overlay.style.display = 'none'
+
+        if (!current_blob_url) {
+            alert('Please connect to a URL first')
+            return
+        }
+
+        var file = e.dataTransfer.files[0]
+        if (!file) return
+
+        document.getElementById('status').textContent = 'Uploading...'
+
+        try {
+            var response = await fetch(current_blob_url, {
+                method: 'PUT',
+                headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                body: file
+            })
+            if (!response.ok) {
+                document.getElementById('status').textContent = 'Upload failed: ' + response.status
+            }
+            // The subscription will automatically show the new image
+        } catch (err) {
+            document.getElementById('status').textContent = 'Upload error: ' + err.message
+            console.error('Upload error:', err)
+        }
+    })
+</script>

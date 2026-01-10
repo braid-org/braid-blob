@@ -20,39 +20,27 @@ require('http').createServer((req, res) => {
 }).listen(8888)
 ```
 
-That's it! You now have a blob synchronization server.
+That's it! You now have a blob synchronization server. Upload an image:
 
-### Usage Examples
-
-First let's upload a file:
 ```bash
-curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/image.png
+curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/blob.png
 ```
 
-View image in browser at http://localhost:8888/image.png
+Then view it at http://localhost:8888/blob.png
 
-To see updates, let's do a textual example for easy viewing:
+### Demo
 
-```
-curl -X PUT -H "Content-Type: text/plain" -d "hello" http://localhost:8888/text
-```
+Run the demo server:
 
-Next, subscribe for updates:
-```
-curl -H "Subscribe: true" http://localhost:8888/text
-```
-
-Now, in another terminal, write over the file:
 ```bash
-curl -X PUT -H "Content-Type: text/plain" -d "world" http://localhost:8888/text
+node server-demo.js
 ```
 
-Should see activity in the first terminal showing the update.
+Then open http://localhost:8888 in your browser. You can drag and drop images to upload them, and open multiple browser windows to see real-time sync in action.
 
-```
-# Delete a file
-curl -X DELETE http://localhost:8888/text
-```
+<!-- TODO: Add demo video
+![Demo](demo.mp4)
+-->
 
 ## API
 
@@ -61,16 +49,8 @@ curl -X DELETE http://localhost:8888/text
 ```javascript
 var braid_blob = require('braid-blob')
 
-// Set custom blob storage location (default: './braid-blob-db')
-// This uses url-file-db for efficient URL-to-file mapping
-braid_blob.db_folder = './custom_files_folder'
-
-// Set custom metadata storage location (default: './braid-blob-meta')
-// Stores version metadata and peer information
-braid_blob.meta_folder = './custom_meta_folder'
-
-// Set custom peer ID (default: auto-generated and persisted)
-braid_blob.peer = 'my-server-id'
+// Set custom storage location (default: './braid-blobs')
+braid_blob.db_folder = './my-blobs'
 ```
 
 ### `braid_blob.serve(req, res, options)`
@@ -87,6 +67,21 @@ Handles HTTP requests for blob storage and synchronization.
 - `GET` - Retrieve a blob (with optional `Subscribe: true` header)
 - `PUT` - Store/update a blob
 - `DELETE` - Remove a blob
+
+### `braid_blob.sync(key, url, options)`
+
+Bidirectionally synchronizes a blob between local storage and a remote URL.
+
+**Parameters:**
+- `key` - Local storage key (string)
+- `url` - Remote URL (URL object)
+- `options` - Optional configuration object
+  - `signal` - AbortSignal for cancellation (use to stop sync)
+  - `content_type` / `accept` - Content type for requests
+  - `on_pre_connect` - Async callback before connection attempt
+  - `on_disconnect` - Callback when connection drops
+  - `on_unauthorized` - Callback on 401/403 responses
+  - `on_res` - Callback receiving the response object
 
 ### `braid_blob.get(key, options)`
 
@@ -113,30 +108,63 @@ Stores a blob to local storage or a remote URL.
 - `body` - Buffer or data to store
 - `options` - Optional configuration object
   - `version` - Version identifier
-  - `content_type` / `accept` - Content type of the blob
+  - `content_type` - Content type of the blob
   - `signal` - AbortSignal for cancellation
 
-### `braid_blob.sync(a, b, options)`
+### `braid_blob.delete(key, options)`
 
-Bidirectionally synchronizes blobs between two endpoints (local keys or URLs).
+Deletes a blob from local storage or a remote URL.
 
 **Parameters:**
-- `a` - First endpoint (local key or URL)
-- `b` - Second endpoint (local key or URL)
+- `key` - Local storage key (string) or remote URL (URL object)
 - `options` - Optional configuration object
-  - `signal` - AbortSignal for cancellation (use to stop sync)
-  - `content_type` / `accept` - Content type for requests
-  - `on_pre_connect` - Async callback before connection attempt
-  - `on_disconnect` - Callback when connection drops
-  - `on_unauthorized` - Callback on 401/403 responses
+  - `signal` - AbortSignal for cancellation
+
+## Browser Client
+
+A simple browser client is included for subscribing to blob updates.
+
+```html
+<script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
+<script src="/client.js"></script>
+<script>
+    braid_blob_client('http://localhost:8888/blob.png', {
+        on_update: (blob, content_type, version) => {
+            // Called whenever the blob is updated
+            var url = URL.createObjectURL(new Blob([blob], { type: content_type }))
+            document.getElementById('image').src = url
+        },
+        on_delete: () => console.log('Blob was deleted'),
+        on_error: (e) => console.error('Error:', e)
+    })
+</script>
+```
+
+### `braid_blob_client(url, options)`
+
+Subscribes to a blob endpoint and receives updates.
+
+**Parameters:**
+- `url` - The blob endpoint URL
+- `options` - Configuration object
+  - `on_update(blob, content_type, version)` - Callback for updates
+  - `on_delete` - Callback when blob is deleted
+  - `on_error` - Callback for errors
   - `on_res` - Callback receiving the response object
+
+**Returns:** `{ stop }` - Call `stop()` to unsubscribe.
 
 ## Testing
 
-### to run unit tests:
-first run the test server:
+```bash
+npm install
+node test/test.js
+```
 
-    npm install
-    node test/server.js
+Or run tests in the browser:
 
-then open http://localhost:8889/test.html, and the boxes should turn green as the tests pass.
+```bash
+node test/test.js -b
+```
+
+Then open http://localhost:8889/test.html
