@@ -28,9 +28,12 @@ Then view it at http://localhost:8888/blob.png
 
 ### Demo
 
-Run the demo server:
+Clone the repo and run the demo server:
 
 ```bash
+git clone https://github.com/braid-org/braid-blob.git
+cd braid-blob
+npm install
 node server-demo.js
 ```
 
