@@ -38,9 +38,7 @@ node server-demo.js
 
 Then open http://localhost:8888 in your browser. You can drag and drop images to upload them, and open multiple browser windows to see real-time sync in action.
 
-<!-- TODO: Add demo video
-![Demo](demo.mp4)
--->
+<video src="https://github.com/user-attachments/assets/0418a03f-31f5-4fc4-9ad4-e49fab6394c9" controls width="600"></video>
 
 ## API
 
