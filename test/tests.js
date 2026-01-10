@@ -1390,9 +1390,8 @@ runTest(
                     // Get the file to verify it has the expected version
                     var result1 = await bb1.get(test_key)
 
-                    // Check what metadata was saved
-                    var meta1 = bb1.meta_cache[test_key]
-                    var debug_info = 'meta1: ' + JSON.stringify(meta1) + '; '
+                    // Close the first instance's db
+                    bb1.meta_db.close()
 
                     // Wait a bit to ensure file system has settled
                     await new Promise(resolve => setTimeout(resolve, 100))
@@ -1406,20 +1405,17 @@ runTest(
                     // Initialize bb2 by doing a get (this triggers init)
                     var result2 = await bb2.get(test_key)
 
-                    // Check what metadata bb2 sees
-                    var meta2 = bb2.meta_cache[test_key]
-                    debug_info += 'meta2: ' + JSON.stringify(meta2) + '; '
-
                     // The version should be the same - no new event ID generated
                     var versions_match = (result1.version[0] === result2.version[0])
                     var both_have_expected = (result1.version[0] === 'test-peer-123456')
 
                     // Clean up
+                    bb2.meta_db.close()
                     await fs.rm(db_folder, { recursive: true, force: true })
                     await fs.rm(meta_folder, { recursive: true, force: true })
 
                     res.end(versions_match && both_have_expected ? 'true' :
-                            'false: v1=' + result1.version[0] + ', v2=' + result2.version[0] + ' | ' + debug_info)
+                            'false: v1=' + result1.version[0] + ', v2=' + result2.version[0])
                 } catch (e) {
                     // Clean up even on error
                     await fs.rm(db_folder, { recursive: true, force: true })
@@ -1789,7 +1785,7 @@ runTest(
 )
 
 runTest(
-    "test atomic write creates temp folder on init",
+    "test atomic write creates temp_folder on init",
     async () => {
         var r1 = await braid_fetch(`/eval`, {
             method: 'POST',
@@ -1807,15 +1803,14 @@ runTest(
                     // Initialize
                     await bb.init()
 
-                    // Check that temp folder exists inside meta folder
-                    var temp_folder = meta_folder + '/temp'
-                    var stat = await fs.stat(temp_folder)
-                    var is_dir = stat.isDirectory()
+                    // Check that temp_folder is set to meta_folder (no /temp subdirectory anymore)
+                    var temp_folder_correct = bb.temp_folder === meta_folder
 
-                    res.end(is_dir ? 'true' : 'not a directory')
+                    res.end(temp_folder_correct ? 'true' : 'temp_folder is ' + bb.temp_folder)
                 } catch (e) {
                     res.end('error: ' + e.message)
                 } finally {
+                    bb.meta_db.close()
                     await fs.rm(db_folder, { recursive: true, force: true })
                     await fs.rm(meta_folder, { recursive: true, force: true })
                 }
@@ -1845,14 +1840,15 @@ runTest(
                     // Do a write
                     await bb.put('/test-file', Buffer.from('hello'), { version: ['1'] })
 
-                    // Check that temp folder is empty (no leftover temp files)
-                    var temp_folder = meta_folder + '/temp'
-                    var files = await fs.readdir(temp_folder)
+                    // Check that no temp_ files remain in temp_folder
+                    var files = await fs.readdir(bb.temp_folder)
+                    var temp_files = files.filter(f => f.startsWith('temp_'))
 
-                    res.end(files.length === 0 ? 'true' : 'leftover files: ' + files.join(', '))
+                    res.end(temp_files.length === 0 ? 'true' : 'leftover files: ' + temp_files.join(', '))
                 } catch (e) {
                     res.end('error: ' + e.message)
                 } finally {
+                    bb.meta_db.close()
                     await fs.rm(db_folder, { recursive: true, force: true })
                     await fs.rm(meta_folder, { recursive: true, force: true })
                 }
@@ -1890,6 +1886,7 @@ runTest(
                 } catch (e) {
                     res.end('error: ' + e.message)
                 } finally {
+                    bb.meta_db.close()
                     await fs.rm(db_folder, { recursive: true, force: true })
                     await fs.rm(meta_folder, { recursive: true, force: true })
                 }
@@ -1926,15 +1923,16 @@ runTest(
                     var content = result.body.toString()
                     var version = result.version[0]
 
-                    // Also verify temp folder is clean
-                    var temp_folder = meta_folder + '/temp'
-                    var files = await fs.readdir(temp_folder)
+                    // Also verify no temp_ files remain
+                    var files = await fs.readdir(bb.temp_folder)
+                    var temp_files = files.filter(f => f.startsWith('temp_'))
 
-                    res.end(content === 'write3' && version === '3' && files.length === 0 ? 'true' :
-                        'content=' + content + ', version=' + version + ', temp_files=' + files.length)
+                    res.end(content === 'write3' && version === '3' && temp_files.length === 0 ? 'true' :
+                        'content=' + content + ', version=' + version + ', temp_files=' + temp_files.length)
                 } catch (e) {
                     res.end('error: ' + e.message)
                 } finally {
+                    bb.meta_db.close()
                     await fs.rm(db_folder, { recursive: true, force: true })
                     await fs.rm(meta_folder, { recursive: true, force: true })
                 }

@@ -2,17 +2,16 @@ var {http_server: braidify, fetch: braid_fetch} = require('braid-http')
 
 function create_braid_blob() {
     var braid_blob = {
-        db_folder: './braid-blob-db',
-        meta_folder: './braid-blob-meta',
+        db_folder: null, // defaults to './braid-blobs'
+        meta_folder: null, // defaults to './braid-blobs'
+        temp_folder: null, // defaults to './braid-blobs'
         cache: {},
-        meta_cache: {},
         key_to_subs: {},
         peer: null, // will be auto-generated if not set by the user
         db: null, // object with read/write/delete methods
+        meta_db: null, // sqlite database for meta storage
         reconnect_delay_ms: 1000,
     }
-
-    var temp_folder = null // will be set in init
 
     braid_blob.sync = (a, b, options = {}) => {
         options = normalize_options(options)
@@ -370,7 +369,7 @@ function create_braid_blob() {
                 if (options.content_type)
                     meta.content_type = options.content_type
 
-                await save_meta(key)
+                save_meta(key, meta)
                 if (options.signal?.aborted) return
 
                 // Notify all subscriptions of the update
@@ -441,17 +440,85 @@ function create_braid_blob() {
         await braid_blob.init()
 
         async function real_init() {
-            // Ensure our meta folder exists
-            await require('fs').promises.mkdir(braid_blob.meta_folder, { recursive: true })
+            var fs = require('fs')
 
-            // Create a temp folder inside the meta folder for writing temp files,
-            // for atomic writing.
-            // The temp folder is called "temp",
-            // And this is guaranteed not to conflict with any other files,
-            // because other files are the result of encode_filename,
-            // which always ends with a ".XX" (for handling insensitive filesystems)
-            temp_folder = `${braid_blob.meta_folder}/temp`
-            await require('fs').promises.mkdir(temp_folder, { recursive: true })
+            var db_was_not_set = !braid_blob.db_folder
+            if (db_was_not_set)
+                braid_blob.db_folder = './braid-blobs'
+
+            var get_db_folder = () =>
+                ((typeof braid_blob.db_folder === 'string') &&
+                braid_blob.db_folder) || './braid-blobs'
+
+            // deal with temp folder
+            if (!braid_blob.temp_folder) {
+                // Deal with versions before 0.0.53
+                await fs.promises.rm(
+                    `${braid_blob.meta_folder || './braid-blob-meta'}/temp`,
+                    { recursive: true, force: true })
+                
+                braid_blob.temp_folder = braid_blob.meta_folder ||
+                    get_db_folder()
+            }
+            await fs.promises.mkdir(braid_blob.temp_folder, 
+                { recursive: true })
+            for (var f of await fs.promises.readdir(braid_blob.temp_folder))
+                if (f.match(/^temp_\w+$/))
+                    await fs.promises.unlink(`${braid_blob.temp_folder}/${f}`)
+            
+            // deal with meta folder
+            var meta_was_not_set = !braid_blob.meta_folder
+            if (meta_was_not_set)
+                braid_blob.meta_folder = get_db_folder()
+            await fs.promises.mkdir(braid_blob.meta_folder,
+                { recursive: true })
+
+            // set up sqlite for meta storage
+            var Database = require('better-sqlite3')
+            braid_blob.meta_db = new Database(
+                `${braid_blob.meta_folder}/meta.sqlite`)
+            braid_blob.meta_db.pragma('journal_mode = WAL')
+            braid_blob.meta_db.exec(`
+                CREATE TABLE IF NOT EXISTS meta (
+                    key TEXT PRIMARY KEY,
+                    value JSON
+                )
+            `)
+
+            // Deal with versions before 0.0.53
+            async function migrate_meta_files(dir) {
+                for (var f of await fs.promises.readdir(dir)) {
+                    if (!f.match(/\.[0-9a-f]+$/i)) continue
+                    var key = decode_filename(f)
+                    var value = JSON.parse(
+                        await fs.promises.readFile(`${dir}/${f}`, 'utf8'))
+                    save_meta(key, value)
+                    await fs.promises.unlink(`${dir}/${f}`)
+                }
+            }
+            if (meta_was_not_set) {
+                try {
+                    await fs.promises.access('./braid-blob-meta')
+                    await migrate_meta_files('./braid-blob-meta')
+                    await fs.promises.rm('./braid-blob-meta', { recursive: true })
+                } catch (e) {}
+            } else if (braid_blob.meta_folder !== braid_blob.db_folder)
+                await migrate_meta_files(braid_blob.meta_folder)
+
+            // Deal with versions before 0.0.53: migrate db files from ./braid-blob-db
+            if (db_was_not_set) {
+                try {
+                    await fs.promises.access('./braid-blob-db')
+                    for (var f of await fs.promises.readdir('./braid-blob-db')) {
+                        if (!f.match(/\.[0-9a-f]+$/i)) continue
+                        await fs.promises.copyFile(
+                            `./braid-blob-db/${f}`,
+                            `${braid_blob.db_folder}/${f}`)
+                        await fs.promises.unlink(`./braid-blob-db/${f}`)
+                    }
+                    await fs.promises.rm('./braid-blob-db', { recursive: true })
+                } catch (e) {}
+            }
 
             // Set up db - either use provided object or create file-based storage
             if (typeof braid_blob.db_folder === 'string') {
@@ -468,7 +535,7 @@ function create_braid_blob() {
                     },
                     write: async (key, data) => {
                         var file_path = `${braid_blob.db_folder}/${encode_filename(key)}`
-                        await atomic_write(file_path, data, temp_folder)
+                        await atomic_write(file_path, data, braid_blob.temp_folder)
                     },
                     delete: async (key) => {
                         var file_path = `${braid_blob.db_folder}/${encode_filename(key)}`
@@ -490,34 +557,20 @@ function create_braid_blob() {
         }
     }
 
-    async function get_meta(key) {
-        if (!braid_blob.meta_cache[key]) {
-            try {
-                braid_blob.meta_cache[key] = JSON.parse(
-                    await require('fs').promises.readFile(
-                        `${braid_blob.meta_folder}/${encode_filename(key)}`, 'utf8'))
-            } catch (e) {
-                if (e.code === 'ENOENT')
-                    braid_blob.meta_cache[key] = {}
-                else throw e
-            }
-        }
-        return braid_blob.meta_cache[key]
+    function get_meta(key) {
+        var row = braid_blob.meta_db.prepare(
+            `SELECT value FROM meta WHERE key = ?`).get(key)
+        return row ? JSON.parse(row.value) : {}
     }
 
-    async function save_meta(key) {
-        await atomic_write(`${braid_blob.meta_folder}/${encode_filename(key)}`,
-            JSON.stringify(braid_blob.meta_cache[key]), temp_folder)
+    function save_meta(key, meta) {
+        braid_blob.meta_db.prepare(
+            `INSERT OR REPLACE INTO meta (key, value) VALUES (?, json(?))`)
+            .run(key, JSON.stringify(meta))
     }
 
-    async function delete_meta(key) {
-        delete braid_blob.meta_cache[key]
-        try {
-            await require('fs').promises.unlink(
-                `${braid_blob.meta_folder}/${encode_filename(key)}`)
-        } catch (e) {
-            if (e.code !== 'ENOENT') throw e
-        }
+    function delete_meta(key) {
+        braid_blob.meta_db.prepare(`DELETE FROM meta WHERE key = ?`).run(key)
     }
 
     //////////////////////////////////////////////////////////////////
@@ -663,6 +716,16 @@ function create_braid_blob() {
         }
     }
 
+    function decode_filename(s) {
+        // Remove the postfix '.XXX'
+        s = s.replace(/\.[^.]+$/, '')
+        // Decode percent-encoded characters
+        s = decodeURIComponent(s)
+        // Swap ! and / (reverse of encode)
+        s = s.replace(/[\/!]/g, x => x === '!' ? '/' : '!')
+        return s
+    }
+
     function normalize_options(options = {}) {
         if (!normalize_options.special) {
             normalize_options.special = {
@@ -704,7 +767,7 @@ function create_braid_blob() {
     }
 
     async function atomic_write(final_destination, data, temp_folder) {
-        var temp = `${temp_folder}/${Math.random().toString(36).slice(2)}`
+        var temp = `${temp_folder}/temp_${Math.random().toString(36).slice(2)}`
         await require('fs').promises.writeFile(temp, data)
         await require('fs').promises.rename(temp, final_destination)
     }
@@ -742,6 +805,7 @@ function create_braid_blob() {
 
     braid_blob.create_braid_blob = create_braid_blob
     braid_blob.braid_fetch = braid_fetch
+    braid_blob.encode_filename = encode_filename
 
     return braid_blob
 }
