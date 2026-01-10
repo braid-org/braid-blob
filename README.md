@@ -26,7 +26,7 @@ curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/blob.
 
 Then view it at http://localhost:8888/blob.png
 
-### Demo
+### Browser Client Demo
 
 Clone the repo and run the demo server:
 
@@ -37,7 +37,7 @@ npm install
 node server-demo.js
 ```
 
-Then open http://localhost:8888 in your browser. You can drag and drop images to upload them, and open multiple browser windows to see real-time sync in action.
+Then open http://localhost:8888 in your browser to see the browser client demo. You can drag and drop images to upload them, and open multiple browser windows to see real-time sync in action.
 
 <video src="https://github.com/user-attachments/assets/0418a03f-31f5-4fc4-9ad4-e49fab6394c9" controls width="600"></video>
 
