@@ -118,6 +118,18 @@ braid_blob.get(key, options)
 
 Retrieves a blob from local storage or a remote URL.
 
+Examples:
+```javascript
+// Get the current contents of a local blob:
+braid_blob.get('foo').body
+
+// Get the contents of a remote blob:
+braid_blob.get(new URL('https://foo.bar/baz')).body
+
+// Get an old version of a remote blob:
+braid_blob.get(new URL('https://foo.bar/baz'), {version: ["5zb2sjdstmk-1768093765048"]}).body
+```
+
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
 - `options` - Optional configuration object
