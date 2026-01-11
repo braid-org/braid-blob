@@ -3,7 +3,7 @@
 A library for synchronizing binary blobs (files, images, etc.) consistently over [Braid-HTTP](https://braid.org).  Guarantees all peers (HTTP clients and servers) resolve to the same version of blob.
 
 Blobs can be read written locally, or over the network.  
-Blobs are stored on disk in af older.
+Blobs are stored on disk in a folder.
 
 ## Quick Start
 
