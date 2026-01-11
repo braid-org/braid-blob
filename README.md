@@ -85,7 +85,8 @@ Parameters:
 - `options` - Optional configuration object
   - `key` - The blob on disk to sync with (default: `req.url`)
 
-### Sync a remote blob to our local blob storage
+### Sync a remotely served blob to disk
+
 Your app becomes a blob client with:
 
 ```javascript
@@ -101,7 +102,7 @@ Parameters:
   - `signal` - AbortSignal for cancellation (use to stop sync)
   - `content_type` - Content type for requests
 
-### Read and write a blob locally
+### Read, Write or Delete a blob
 
 #### Read a local or remote blob
 
@@ -125,7 +126,9 @@ Returns: `{version, body, content_type}` object, or `null` if not found.
 
 #### Write a local or remote blob
 
-`braid_blob.put(key, body, options)`
+```javascript
+braid_blob.put(key, body, options)
+```
 
 Stores a blob to local storage or a remote URL.
 
@@ -139,7 +142,9 @@ Parameters:
 
 #### Delete a local or remote blob
 
-`braid_blob.delete(key, options)`
+```
+braid_blob.delete(key, options)
+```
 
 Deletes a blob from local storage or a remote URL.
 
@@ -170,7 +175,9 @@ A simple browser client is included for subscribing to blob updates.
 
 ### Subscribe to remote blob
 
-`braid_blob_client(url, options)`
+```javascript
+braid_blob_client(url, options)
+```
 
 Subscribes to a blob endpoint and receives updates.
 
