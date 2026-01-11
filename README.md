@@ -46,22 +46,84 @@ node server-demo.js
 
 Now open up http://localhost:8888 in your browser, to see the client.  Open two windows.  You can drag and drop images between them, and they will always stay synchronized.
 
-<video src="https://github.com/user-attachments/assets/0418a03f-31f5-4fc4-9ad4-e49fab6394c9" controls width="600"></video>
-
-Todo: Demo what happens when you kill the server and make mutations.  They should all sync.  It might be even more impressive if the image is repeated 9 times on each screen, where each repeat is its own client, and you can drop onto any of them to change the other ones.  Then when you kill the serverk, you can change them individually.  When you bring it back, they'll all sync to the "latest" one.
+<video src="https://github.com/user-attachments/assets/24136939-613f-4d97-9803-f52828f00536" controls width="600"></video>
 
 ## Network API
 
-```
-fill this in with GET, PUT, DELETE descriptions
-- probably show some an example GET and PUT request/response?
-- explain how to interpret the versions?
-- reference the relevant braid specs
+Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an extension to HTTP for synchronization.
+
+### GET - Retrieve a blob
+
+```http
+GET /blob.png HTTP/1.1
 ```
 
-- `GET` - Retrieve a blob (with optional `Subscribe: true` header)
-- `PUT` - Store/update a blob
-- `DELETE` - Remove a blob
+Response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/png
+
+<binary data>
+```
+
+### GET with Subscribe - Real-time updates
+
+Add `Subscribe: true` to receive updates whenever the blob changes:
+
+```http
+GET /blob.png HTTP/1.1
+Subscribe: true
+```
+
+Response (keeps connection open, streams updates):
+
+```http
+HTTP/1.1 209 Subscription
+Subscribe: true
+Current-Version: "alice-1"
+
+Version: "alice-1"
+Content-Type: image/png
+Merge-Type: aww
+Content-Length: 12345
+
+<binary data>
+
+Version: "bob-2"
+Content-Type: image/png
+Merge-Type: aww
+Content-Length: 23456
+
+<new binary data>
+...
+```
+
+### PUT - Store a blob
+
+```http
+PUT /blob.png HTTP/1.1
+Version: "carol-3"
+Content-Type: image/png
+Merge-Type: aww
+
+<binary data>
+```
+
+### DELETE - Remove a blob
+
+```http
+DELETE /blob.png HTTP/1.1
+```
+
+### Understanding versions
+
+Versions look like `"alice-42"` where:
+- `alice` is a peer ID (identifies who made the change)
+- `42` is a sequence number (generally milliseconds past the epoch, or one plus the current number if it is past the current time)
+
+Conflicts resolve using ["arbitrary-writer-wins" (AWW)](https://braid.org/protocol/merge-types/aww): the version with the highest sequence number wins. If sequences match, the peer ID string is compared lexicographically.
+
 
 
 ## Nodejs API
