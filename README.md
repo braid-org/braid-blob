@@ -31,13 +31,13 @@ curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/blob.
 
 You can view it at http://localhost:8888/blob.png
 
-### Interactive Demo
+## Interactive Demo
 
 Run the demo web server with:
 
 ```shell
 node server-demo.js
-``'
+```
 
 Now open up http://localhost:8888 in your browser, to see the client.  Open two windows.  You can drag and drop images between them, and they will always stay synchronized.
 
