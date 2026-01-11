@@ -83,7 +83,7 @@ Your app becomes a blob server with:
 braid_blob.serve(req, res, options)
 ```
 
-This will synchronize the client issuing the given request and response with the blob on disk.
+This will synchronize the client issuing the given request and response with its blob on disk.
 
 Parameters:
 - `req` - HTTP request object
@@ -99,10 +99,10 @@ Your app becomes a blob client with:
 braid_blob.sync(key, url, options)
 ```
 
-Synchronizes a remote URL to a blob on disk.
+Synchronizes a remote URL to its blob on disk.
 
 Parameters:
-- `key` - Local storage key (string)
+- `key` - The blob on disk (string)
 - `url` - Remote URL (URL object)
 - `options` - Optional configuration object
   - `signal` - AbortSignal for cancellation (use to stop sync)
@@ -119,7 +119,7 @@ braid_blob.get(key, options)
 Retrieves a blob from local storage or a remote URL.
 
 Parameters:
-- `key` - Local storage key (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url))
+- `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
 - `options` - Optional configuration object
   - `version` - Version ID to check existence (use with `head: true`)
   - `parent` - Version ID; when subscribing, only receive updates newer than this
@@ -139,7 +139,7 @@ braid_blob.put(key, body, options)
 Stores a blob to local storage or a remote URL.
 
 Parameters:
-- `key` - Local storage key (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url))
+- `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
 - `body` - Buffer or data to store
 - `options` - Optional configuration object
   - `version` - Version identifier
@@ -155,7 +155,7 @@ braid_blob.delete(key, options)
 Deletes a blob from local storage or a remote URL.
 
 Parameters:
-- `key` - Local storage key (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url))
+- `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to delete
 - `options` - Optional configuration object
   - `signal` - AbortSignal for cancellation
 
