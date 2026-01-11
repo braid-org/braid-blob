@@ -13,7 +13,7 @@ Install this library in your Javascript project:
 npm install braid-blob
 ```
 
-And now use it to server HTTP requests with:
+And now use it to serve HTTP requests with:
 
 ```javascript
 require('http').createServer((req, res) => {
