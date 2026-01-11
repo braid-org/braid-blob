@@ -113,7 +113,7 @@ braid_blob.get(key, options)
 Retrieves a blob from local storage or a remote URL.
 
 Parameters:
-- `key` - Local storage key (string) or remote URL (URL object)
+- `key` - Local storage key (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url))
 - `options` - Optional configuration object
   - `version` - Version ID to check existence (use with `head: true`)
   - `parent` - Version ID; when subscribing, only receive updates newer than this
@@ -133,7 +133,7 @@ braid_blob.put(key, body, options)
 Stores a blob to local storage or a remote URL.
 
 Parameters:
-- `key` - Local storage key (string) or remote URL (URL object)
+- `key` - Local storage key (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url))
 - `body` - Buffer or data to store
 - `options` - Optional configuration object
   - `version` - Version identifier
@@ -142,14 +142,14 @@ Parameters:
 
 #### Delete a local or remote blob
 
-```
+```javascript
 braid_blob.delete(key, options)
 ```
 
 Deletes a blob from local storage or a remote URL.
 
 Parameters:
-- `key` - Local storage key (string) or remote URL (URL object)
+- `key` - Local storage key (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url))
 - `options` - Optional configuration object
   - `signal` - AbortSignal for cancellation
 
