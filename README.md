@@ -103,7 +103,7 @@ Parameters:
 
 ### Read and write a blob locally
 
-#### Read a local blob
+#### Read a local or remote blob
 
 ```javascript
 braid_blob.get(key, options)
@@ -123,7 +123,7 @@ Parameters:
 
 Returns: `{version, body, content_type}` object, or `null` if not found.
 
-#### Write a local blob
+#### Write a local or remote blob
 
 `braid_blob.put(key, body, options)`
 
@@ -137,7 +137,7 @@ Parameters:
   - `content_type` - Content type of the blob
   - `signal` - AbortSignal for cancellation
 
-#### Delete a local blob
+#### Delete a local or remote blob
 
 `braid_blob.delete(key, options)`
 
