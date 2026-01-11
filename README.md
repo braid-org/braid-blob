@@ -71,24 +71,28 @@ braid_blob.db_folder = './braid-blobs'  // Optional: set custom blob storage fol
 
 ### Serve blobs to HTTP Requests (GET, PUT, and DELETE)
 
-Your app becomes a blob server.
+Your app becomes a blob server with:
 
-`braid_blob.serve(req, res, options)`
+```javascript
+braid_blob.serve(req, res, options)
+```
 
-Handles HTTP requests for blob storage and synchronization.
+This will synchronize the client issuing the given request and response with the blob on disk.
 
 Parameters:
 - `req` - HTTP request object
 - `res` - HTTP response object
 - `options` - Optional configuration object
-  - `key` - Override the resource key (default: URL path)
+  - `key` - The blob on disk to sync with (default: `req.url`)
 
 ### Sync a remote blob to our local blob storage
-Your app becomes a blob client
+Your app becomes a blob client with:
 
-`braid_blob.sync(key, url, options)`
+```javascript
+braid_blob.sync(key, url, options)
+```
 
-Bidirectionally synchronizes a blob between local storage and a remote URL.
+Synchronizes a remote URL to a blob on disk.
 
 Parameters:
 - `key` - Local storage key (string)
@@ -101,7 +105,9 @@ Parameters:
 
 #### Read a local blob
 
-`braid_blob.get(key, options)`
+```javascript
+braid_blob.get(key, options)
+```
 
 Retrieves a blob from local storage or a remote URL.
 
