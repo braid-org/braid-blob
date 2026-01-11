@@ -4,13 +4,13 @@ A simple, self-contained library for synchronizing binary blobs (files, images, 
 
 ## Quick Start
 
-### Installation
+Install this library in your Javascript project:
 
 ```bash
 npm install braid-blob
 ```
 
-### Basic Server
+And now use it to server HTTP requests with:
 
 ```javascript
 require('http').createServer((req, res) => {
@@ -18,13 +18,15 @@ require('http').createServer((req, res) => {
 }).listen(8888)
 ```
 
-That's it! You now have a blob synchronization server. Upload an image:
+That's it! You are now serving synchronized binary blobs at http://localhost:8888/*.
+
+Upload an image to it:
 
 ```bash
 curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/blob.png
 ```
 
-Then view it at http://localhost:8888/blob.png
+You can view it at http://localhost:8888/blob.png
 
 ### Browser Client Demo
 
