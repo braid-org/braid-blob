@@ -31,20 +31,19 @@ curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/blob.
 
 You can view it at http://localhost:8888/blob.png
 
-### Browser Client Demo
+### Interactive Demo
 
-Clone the repo and run the demo server:
+Run the demo web server with:
 
-```bash
-git clone https://github.com/braid-org/braid-blob.git
-cd braid-blob
-npm install
+```shell
 node server-demo.js
-```
+``'
 
-Then open http://localhost:8888 in your browser to see the browser client demo. You can drag and drop images to upload them, and open multiple browser windows to see real-time sync in action.
+Now open up http://localhost:8888 in your browser, to see the client.  Open two windows.  You can drag and drop images between them, and they will always stay synchronized.
 
 <video src="https://github.com/user-attachments/assets/0418a03f-31f5-4fc4-9ad4-e49fab6394c9" controls width="600"></video>
+
+Todo: Demo what happens when you kill the server and make mutations.  They should all sync.  It might be even more impressive if the image is repeated 9 times on each screen, where each repeat is its own client, and you can drop onto any of them to change the other ones.  Then when you kill the serverk, you can change them individually.  When you bring it back, they'll all sync to the "latest" one.
 
 ## Network API
 
