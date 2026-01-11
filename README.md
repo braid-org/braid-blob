@@ -127,7 +127,10 @@ braid_blob.get('foo').body
 braid_blob.get(new URL('https://foo.bar/baz')).body
 
 // Get an old version of a remote blob:
-braid_blob.get(new URL('https://foo.bar/baz'), {version: ["5zb2sjdstmk-1768093765048"]}).body
+braid_blob.get(
+   new URL('https://foo.bar/baz'),
+   {version: ["5zb2sjdstmk-1768093765048"]}
+).body
 ```
 
 Parameters:
