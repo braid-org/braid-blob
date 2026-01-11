@@ -18,8 +18,10 @@ And now use it to serve HTTP requests with:
 ```javascript
 // Create a HTTP server
 require('http').createServer((req, res) => {
+
     // At any point, use braid-blob to serve any request you want
     require('braid-blob').serve(req, res)
+
 }).listen(8888)
 ```
 
