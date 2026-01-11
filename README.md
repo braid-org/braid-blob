@@ -179,7 +179,7 @@ A simple browser client is included for subscribing to blob updates.
 braid_blob_client(url, options)
 ```
 
-Subscribes to a blob endpoint and receives updates.
+Subscribes to a blob endpoint, and calls `options.on_update()` with each update.
 
 Parameters:
 - `url` - The blob endpoint URL
