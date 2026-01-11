@@ -19,7 +19,7 @@ And now use it to serve HTTP requests with:
 // Create a HTTP server
 require('http').createServer((req, res) => {
 
-    // At any point, use braid-blob to serve any request you want
+    // At any point, use braid-blob to respond to any GET, PUT, or DELETE request
     require('braid-blob').serve(req, res)
 
 }).listen(8888)
