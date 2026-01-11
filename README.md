@@ -43,48 +43,67 @@ Then open http://localhost:8888 in your browser to see the browser client demo. 
 
 <video src="https://github.com/user-attachments/assets/0418a03f-31f5-4fc4-9ad4-e49fab6394c9" controls width="600"></video>
 
-## API
+## Network API
 
-### Configuration
+```
+fill this in with GET, PUT, DELETE descriptions
+- probably show some an example GET and PUT request/response?
+- explain how to interpret the versions?
+- reference the relevant braid specs
+```
+
+- `GET` - Retrieve a blob (with optional `Subscribe: true` header)
+- `PUT` - Store/update a blob
+- `DELETE` - Remove a blob
+
+
+## Nodejs API
+
+Import and configure braid-blob with:
 
 ```javascript
 var braid_blob = require('braid-blob')
 
-// Set custom storage location (default: './braid-blobs')
-braid_blob.db_folder = './my-blobs'
+braid_blob.db_folder = './braid-blobs'  // Optional: set custom blob storage folder
 ```
 
-### `braid_blob.serve(req, res, options)`
+### Serve blobs to HTTP Requests (GET, PUT, and DELETE)
+
+Your app becomes a blob server.
+
+`braid_blob.serve(req, res, options)`
 
 Handles HTTP requests for blob storage and synchronization.
 
-**Parameters:**
+Parameters:
 - `req` - HTTP request object
 - `res` - HTTP response object
 - `options` - Optional configuration object
   - `key` - Override the resource key (default: URL path)
 
-**Supported HTTP Methods:**
-- `GET` - Retrieve a blob (with optional `Subscribe: true` header)
-- `PUT` - Store/update a blob
-- `DELETE` - Remove a blob
+### Sync a remote blob to our local blob storage
+Your app becomes a blob client
 
-### `braid_blob.sync(key, url, options)`
+`braid_blob.sync(key, url, options)`
 
 Bidirectionally synchronizes a blob between local storage and a remote URL.
 
-**Parameters:**
+Parameters:
 - `key` - Local storage key (string)
 - `url` - Remote URL (URL object)
 - `options` - Optional configuration object
   - `signal` - AbortSignal for cancellation (use to stop sync)
   - `content_type` - Content type for requests
 
-### `braid_blob.get(key, options)`
+### Read and write a blob locally
+
+#### Read a local blob
+
+`braid_blob.get(key, options)`
 
 Retrieves a blob from local storage or a remote URL.
 
-**Parameters:**
+Parameters:
 - `key` - Local storage key (string) or remote URL (URL object)
 - `options` - Optional configuration object
   - `version` - Version ID to check existence (use with `head: true`)
@@ -94,13 +113,15 @@ Retrieves a blob from local storage or a remote URL.
   - `content_type` - Content type for the request
   - `signal` - AbortSignal for cancellation
 
-**Returns:** `{version, body, content_type}` object, or `null` if not found.
+Returns: `{version, body, content_type}` object, or `null` if not found.
 
-### `braid_blob.put(key, body, options)`
+#### Write a local blob
+
+`braid_blob.put(key, body, options)`
 
 Stores a blob to local storage or a remote URL.
 
-**Parameters:**
+Parameters:
 - `key` - Local storage key (string) or remote URL (URL object)
 - `body` - Buffer or data to store
 - `options` - Optional configuration object
@@ -108,16 +129,18 @@ Stores a blob to local storage or a remote URL.
   - `content_type` - Content type of the blob
   - `signal` - AbortSignal for cancellation
 
-### `braid_blob.delete(key, options)`
+#### Delete a local blob
+
+`braid_blob.delete(key, options)`
 
 Deletes a blob from local storage or a remote URL.
 
-**Parameters:**
+Parameters:
 - `key` - Local storage key (string) or remote URL (URL object)
 - `options` - Optional configuration object
   - `signal` - AbortSignal for cancellation
 
-## Browser Client
+## Browser Client API
 
 A simple browser client is included for subscribing to blob updates.
 
@@ -137,11 +160,13 @@ A simple browser client is included for subscribing to blob updates.
 </script>
 ```
 
-### `braid_blob_client(url, options)`
+### Subscribe to remote blob
+
+`braid_blob_client(url, options)`
 
 Subscribes to a blob endpoint and receives updates.
 
-**Parameters:**
+Parameters:
 - `url` - The blob endpoint URL
 - `options` - Configuration object
   - `on_update(blob, content_type, version)` - Callback for updates
@@ -149,14 +174,16 @@ Subscribes to a blob endpoint and receives updates.
   - `on_error(e)` - Callback for errors
   - `signal` - AbortSignal for cancellation
 
-## Testing
+## Improving this Package
+
+You can run the nodejs tests with:
 
 ```bash
 npm install
 node test/test.js
 ```
 
-Or run tests in the browser:
+Or run the browser tests with:
 
 ```bash
 node test/test.js -b
