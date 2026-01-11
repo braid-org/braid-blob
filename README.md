@@ -33,7 +33,8 @@ Upload an image to it:
 curl -X PUT -H "Content-Type: image/png" -T blob.png http://localhost:8888/blob.png
 ```
 
-You can view it at http://localhost:8888/blob.png
+You can view it at http://localhost:8888/blob.png.  
+A browser client is described below.
 
 ## Interactive Demo
 
