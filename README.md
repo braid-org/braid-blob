@@ -151,7 +151,7 @@ Returns: `{version, body, content_type}` object, or `null` if not found.
 braid_blob.put(key, body, options)
 ```
 
-Stores a blob to local storage or a remote URL.
+Writes a blob to local storage or a remote URL.  Any other peers synchronizing with this blob (via `.serve()`, `.sync()`, or `.get(.., {subscribe:..}`) will be updated.
 
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
