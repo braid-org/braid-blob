@@ -71,7 +71,8 @@ Import and configure braid-blob with:
 ```javascript
 var braid_blob = require('braid-blob')
 
-braid_blob.db_folder = './braid-blobs'  // Optional: set custom blob storage folder
+// Optional: set custom blob storage folder
+braid_blob.db_folder = './braid-blobs'    // Default is ./braid-blobs
 ```
 
 ### Serve blobs to HTTP Requests (GET, PUT, and DELETE)
