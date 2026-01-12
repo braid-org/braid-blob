@@ -23,12 +23,30 @@ var server = require("http").createServer(async (req, res) => {
         return
     }
 
-    if (url === '/') {
+    if (url === '/img-live.js') {
+        res.writeHead(200, {
+            "Content-Type": "text/javascript",
+            "Cache-Control": "no-cache"
+        })
+        require("fs").createReadStream(`${__dirname}/img-live.js`).pipe(res)
+        return
+    }
+
+    if (url === '/' || url === '/client-demo.html') {
         res.writeHead(200, {
             "Content-Type": "text/html",
             "Cache-Control": "no-cache"
         })
         require("fs").createReadStream(`${__dirname}/client-demo.html`).pipe(res)
+        return
+    }
+
+    if (url === '/img-live-demo.html') {
+        res.writeHead(200, {
+            "Content-Type": "text/html",
+            "Cache-Control": "no-cache"
+        })
+        require("fs").createReadStream(`${__dirname}/img-live-demo.html`).pipe(res)
         return
     }
 
