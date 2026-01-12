@@ -141,6 +141,8 @@ Version: "carol-3"
 
 If the sent version is older or eclipsed by the server's current version, the returned `Version` will be the server's version (not the one you sent).
 
+The `braid_blob.serve()` method (below) will accept every PUT sent to it, but you can implement access control for any request before passing it to `serve()`, and return e.g. `401 Unauthorized` if you do no want to allow the PUT.
+
 ### DELETE removes a blob
 
 ```http
