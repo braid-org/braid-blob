@@ -20,8 +20,8 @@
 //   // Update the blob with new data
 //   await blob.update(body, 'text/plain')
 //
-function braid_blob_client(url, options = {}) {
-    var peer = options.peer || Math.random().toString(36).slice(2)
+function braid_blob_client(url, params = {}) {
+    var peer = params.peer || Math.random().toString(36).slice(2)
     var current_version = null
 
     braid_fetch(url, {
@@ -30,24 +30,24 @@ function braid_blob_client(url, options = {}) {
         parents: () => [current_version],
         peer,
         retry: () => true,
-        signal: options.signal
+        signal: params.signal
     }).then(res => {
         res.subscribe(async update => {
             if (update.status == 404) {
                 current_version = null
-                return options.on_delete?.()
+                return params.on_delete?.()
             }
 
             // Only update if version is newer
             var version = update.version?.[0]
             if (compare_events(version, current_version) > 0) {
                 current_version = version
-                options.on_update?.(update.body,
+                params.on_update?.(update.body,
                     update.extra_headers?.['content-type'],
                     current_version)
             }
-        }, e => options.on_error?.(e))
-    }).catch(e => options.on_error?.(e))
+        }, e => params.on_error?.(e))
+    }).catch(e => params.on_error?.(e))
 
     return {
         update: async (body, content_type) => {
@@ -55,7 +55,7 @@ function braid_blob_client(url, options = {}) {
                 increment_seq(get_event_seq(current_version)))
             current_version = `${peer}-${seq}`
 
-            options.on_update?.(body, content_type, current_version)
+            params.on_update?.(body, content_type, current_version)
 
             await braid_fetch(url, {
                 method: 'PUT',

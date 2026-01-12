@@ -96,7 +96,7 @@ Subscribe: true
 Response (keeps connection open, streams updates):
 
 ```http
-HTTP/1.1 209 Subscription
+HTTP/1.1 209 Multiresponse
 Subscribe: true
 Current-Version: "alice-1"
 
@@ -136,10 +136,10 @@ Response:
 
 ```http
 HTTP/1.1 200 OK
-Version: "carol-3"
+Current-Version: "carol-3"
 ```
 
-If the sent version is older or eclipsed by the server's current version, the returned `Version` will be the server's version (not the one you sent).
+If the sent version is older or eclipsed by the server's current version, the returned `Current-Version` will be the server's version (not the one you sent).
 
 The `braid_blob.serve()` method (below) will accept every PUT sent to it, but you can implement access control for any request before passing it to `serve()`, and return e.g. `401 Unauthorized` if you do no want to allow the PUT.
 
@@ -183,7 +183,7 @@ braid_blob.db_folder = './braid-blobs'       // Default: ./braid-blobs
 Your app becomes a blob server with:
 
 ```javascript
-braid_blob.serve(req, res, options)
+braid_blob.serve(req, res, params)
 ```
 
 This will synchronize the client issuing the given request and response with its blob on disk.
@@ -191,7 +191,7 @@ This will synchronize the client issuing the given request and response with its
 Parameters:
 - `req` - HTTP request object
 - `res` - HTTP response object
-- `options` - Optional configuration object
+- `params` - Optional configuration object
   - `key` - The blob on disk to sync with (default: `req.url`)
 
 ### Sync a remotely served blob to disk
@@ -199,7 +199,7 @@ Parameters:
 Your app becomes a blob client with:
 
 ```javascript
-braid_blob.sync(key, url, options)
+braid_blob.sync(key, url, params)
 ```
 
 Synchronizes a remote URL to its blob on disk.
@@ -207,7 +207,7 @@ Synchronizes a remote URL to its blob on disk.
 Parameters:
 - `key` - The blob on disk (string)
 - `url` - Remote URL (URL object)
-- `options` - Optional configuration object
+- `params` - Optional configuration object
   - `signal` - AbortSignal for cancellation (use to stop sync)
   - `content_type` - Content type for requests
 
@@ -216,7 +216,7 @@ Parameters:
 #### Read a local or remote blob
 
 ```javascript
-braid_blob.get(key, options)
+braid_blob.get(key, params)
 ```
 
 Retrieves a blob from local storage or a remote URL.
@@ -238,7 +238,7 @@ braid_blob.get(
 
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
-- `options` - Optional configuration object
+- `params` - Optional configuration object
   - `version` - Version ID to check existence (use with `head: true`)
   - `parent` - Version ID; when subscribing, only receive updates newer than this
   - `subscribe` - Callback function for real-time updates
@@ -251,7 +251,7 @@ Returns: `{version, body, content_type}` object, or `null` if not found.
 #### Write a local or remote blob
 
 ```javascript
-braid_blob.put(key, body, options)
+braid_blob.put(key, body, params)
 ```
 
 Writes a blob to local storage or a remote URL.  Any other peers synchronizing with this blob (via `.serve()`, `.sync()`, or `.get(.., {subscribe: ..}`) will be updated.
@@ -259,7 +259,7 @@ Writes a blob to local storage or a remote URL.  Any other peers synchronizing w
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
 - `body` - Buffer or data to store
-- `options` - Optional configuration object
+- `params` - Optional configuration object
   - `version` - Version identifier
   - `content_type` - Content type of the blob
   - `signal` - AbortSignal for cancellation
@@ -267,14 +267,14 @@ Parameters:
 #### Delete a local or remote blob
 
 ```javascript
-braid_blob.delete(key, options)
+braid_blob.delete(key, params)
 ```
 
 Deletes a blob from local storage or a remote URL.
 
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to delete
-- `options` - Optional configuration object
+- `params` - Optional configuration object
   - `signal` - AbortSignal for cancellation
 
 ## Browser Client API
@@ -300,14 +300,14 @@ A simple browser client is included for subscribing to blob updates.
 ### Subscribe to remote blob
 
 ```javascript
-braid_blob_client(url, options)
+braid_blob_client(url, params)
 ```
 
-Subscribes to a blob endpoint, and calls `options.on_update()` with each update.
+Subscribes to a blob endpoint, and calls `params.on_update()` with each update.
 
 Parameters:
 - `url` - The blob endpoint URL
-- `options` - Configuration object
+- `params` - Configuration object
   - `on_update(blob, content_type, version)` - Callback for updates
   - `on_delete` - Callback when blob is deleted
   - `on_error(e)` - Callback for errors

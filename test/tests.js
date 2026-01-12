@@ -727,7 +727,7 @@ runTest(
         })
         if (!r.ok) throw 'got: ' + r.statusCode
 
-        return r.headers.get('version')
+        return r.headers.get('current-version')
     },
     '"3"'
 )

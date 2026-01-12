@@ -13,9 +13,9 @@ function create_braid_blob() {
         reconnect_delay_ms: 1000,
     }
 
-    braid_blob.sync = (a, b, options = {}) => {
-        options = normalize_options(options)
-        if (!options.peer) options.peer = Math.random().toString(36).slice(2)
+    braid_blob.sync = (a, b, params = {}) => {
+        params = normalize_params(params)
+        if (!params.peer) params.peer = Math.random().toString(36).slice(2)
 
         // Support for same-type params removed for now,
         // since it is unused, unoptimized,
@@ -28,26 +28,26 @@ function create_braid_blob() {
             let swap = a; a = b; b = swap
         }
 
-        reconnector(options.signal, (_e, count) => {
+        reconnector(params.signal, (_e, count) => {
             var delay = braid_blob.reconnect_delay_ms ?? Math.min(count, 3) * 1000
             console.log(`disconnected from ${b.href}, retrying in ${delay}ms`)
             return delay
         }, async (signal, handle_error) => {
             if (signal.aborted) return
-            if (options.on_pre_connect) await options.on_pre_connect()
+            if (params.on_pre_connect) await params.on_pre_connect()
 
             try {
                 // Check if remote has our current version (simple fork-point check)
                 var server_has_our_version = false
                 var local_version = (await braid_blob.get(a, {
-                    ...options,
+                    ...params,
                     signal,
                     head: true
                 }))?.version
                 if (signal.aborted) return
                 if (local_version) {
                     var r = await braid_blob.get(b, {
-                        ...options,
+                        ...params,
                         signal,
                         head: true,
                         dont_retry: true,
@@ -59,14 +59,14 @@ function create_braid_blob() {
 
                 // Local -> remote
                 await braid_blob.get(a, {
-                    ...options,
+                    ...params,
                     signal,
                     parents: server_has_our_version ? local_version : null,
                     subscribe: async update => {
                         try {
                             if (update.delete) {
                                 var x = await braid_blob.delete(b, {
-                                    ...options,
+                                    ...params,
                                     signal,
                                     dont_retry: true,
                                     content_type: update.content_type,
@@ -75,15 +75,15 @@ function create_braid_blob() {
                                 if (!x.ok) handle_error(new Error('failed to delete'))
                             } else {
                                 var x = await braid_blob.put(b, update.body, {
-                                    ...options,
+                                    ...params,
                                     signal,
                                     dont_retry: true,
                                     version: update.version,
                                     content_type: update.content_type,
                                 })
                                 if (signal.aborted) return
-                                if ((x.status === 401 || x.status === 403) && options.on_unauthorized) {
-                                    await options.on_unauthorized?.()
+                                if ((x.status === 401 || x.status === 403) && params.on_unauthorized) {
+                                    await params.on_unauthorized?.()
                                 } else if (!x.ok) handle_error(new Error('failed to PUT: ' + x.status))
                             }
                         } catch (e) { handle_error(e) }
@@ -92,39 +92,39 @@ function create_braid_blob() {
 
                 // Remote -> local
                 var remote_res = await braid_blob.get(b, {
-                    ...options,
+                    ...params,
                     signal,
                     dont_retry: true,
                     parents: local_version,
                     subscribe: async update => {
                         if (update.delete) await braid_blob.delete(a, {
-                            ...options,
+                            ...params,
                             signal,
                             content_type: update.content_type,
                         })
                         else await braid_blob.put(a, update.body, {
-                            ...options,
+                            ...params,
                             signal,
                             version: update.version,
                             content_type: update.content_type,
                         })
                     },
                     on_error: e => {
-                        options.on_disconnect?.()
+                        params.on_disconnect?.()
                         handle_error(e)
                     }
                 })
-                options.on_res?.(remote_res)
+                params.on_res?.(remote_res)
             } catch (e) { handle_error(e) }
         })
     }
 
-    braid_blob.serve = async (req, res, options = {}) => {
+    braid_blob.serve = async (req, res, params = {}) => {
         await braid_blob.init()
 
-        if (!options.key) {
+        if (!params.key) {
             var url = new URL(req.url, 'http://localhost')
-            options.key = url.pathname
+            params.key = url.pathname
         }
 
         free_cors(res)
@@ -144,7 +144,7 @@ function create_braid_blob() {
             res.setHeader("Merge-Type", "aww")
 
             try {
-                var result = await braid_blob.get(options.key, {
+                var result = await braid_blob.get(params.key, {
                     peer: req.peer,
                     head: req.method === "HEAD",
                     version: req.version,
@@ -198,15 +198,15 @@ function create_braid_blob() {
             }
         } else if (req.method === 'PUT') {
             // Handle PUT request to update binary files
-            var event = await braid_blob.put(options.key, body, {
+            var event = await braid_blob.put(params.key, body, {
                 version: req.version,
                 content_type: req.headers['content-type'],
                 peer: req.peer
             })
-            res.setHeader("Version", version_to_header(event != null ? [event] : []))
+            res.setHeader("Current-Version", version_to_header(event != null ? [event] : []))
             res.end('')
         } else if (req.method === 'DELETE') {
-            await braid_blob.delete(options.key, {
+            await braid_blob.delete(params.key, {
                 content_type: req.headers['content-type'],
                 peer: req.peer
             })
@@ -214,44 +214,44 @@ function create_braid_blob() {
         }
     }
 
-    braid_blob.get = async (key, options = {}) => {
-        options = normalize_options(options)
+    braid_blob.get = async (key, params = {}) => {
+        params = normalize_params(params)
 
         // Handle URL case - make a remote GET request
         if (key instanceof URL) {
-            var params = {
-                signal: options.signal,
-                subscribe: options.subscribe,
+            var fetch_params = {
+                signal: params.signal,
+                subscribe: params.subscribe,
                 heartbeats: 120,
             }
-            if (!options.dont_retry) {
-                params.retry = (res) => res.status !== 309 &&
+            if (!params.dont_retry) {
+                fetch_params.retry = (res) => res.status !== 309 &&
                     res.status !== 404 && res.status !== 406
             }
-            if (options.head) params.method = 'HEAD'
+            if (params.head) fetch_params.method = 'HEAD'
             for (var x of ['headers', 'parents', 'version', 'peer'])
-                if (options[x] != null) params[x] = options[x]
-            if (options.content_type)
-                params.headers = { ...params.headers,
-                    'Accept': options.content_type }
+                if (params[x] != null) fetch_params[x] = params[x]
+            if (params.content_type)
+                fetch_params.headers = { ...fetch_params.headers,
+                    'Accept': params.content_type }
 
-            var res = await braid_fetch(key.href, params)
+            var res = await braid_fetch(key.href, fetch_params)
 
             if (!res.ok)
-                if (options.subscribe) throw new Error('failed to subscribe')
+                if (params.subscribe) throw new Error('failed to subscribe')
                 else return null
 
             var result = {}
             if (res.version) result.version = res.version
 
-            if (options.head) return result
+            if (params.head) return result
 
-            if (options.subscribe) {
+            if (params.subscribe) {
                 res.subscribe(async update => {
                     if (update.status === 404) update.delete = true
                     update.content_type = update.extra_headers['content-type']
-                    await options.subscribe(update)
-                }, e => options.on_error?.(e))
+                    await params.subscribe(update)
+                }, e => params.on_error?.(e))
                 return res
             } else {
                 result.body = await res.arrayBuffer()
@@ -260,103 +260,103 @@ function create_braid_blob() {
         }
 
         await braid_blob.init()
-        if (options.signal?.aborted) return
+        if (params.signal?.aborted) return
 
         return await within_fiber(key, async () => {
             var meta = await get_meta(key)
-            if (options.signal?.aborted) return
+            if (params.signal?.aborted) return
 
-            if (!meta.event && !options.subscribe) return null
+            if (!meta.event && !params.subscribe) return null
 
             var result = {
                 version: meta.event ? [meta.event] : [],
                 content_type: meta.content_type
             }
 
-            if (options.header_cb) await options.header_cb(result)
-            if (options.signal?.aborted) return
+            if (params.header_cb) await params.header_cb(result)
+            if (params.signal?.aborted) return
 
             // Check if requested version/parents is newer than what we have - if so, we don't have it
-            if (!options.subscribe) {
-                if (compare_events(options.version?.[0], meta.event) > 0)
-                    throw new Error('unknown version: ' + options.version)
-                if (compare_events(options.parents?.[0], meta.event) > 0)
-                    throw new Error('unknown version: ' + options.parents)
+            if (!params.subscribe) {
+                if (compare_events(params.version?.[0], meta.event) > 0)
+                    throw new Error('unknown version: ' + params.version)
+                if (compare_events(params.parents?.[0], meta.event) > 0)
+                    throw new Error('unknown version: ' + params.parents)
             }
-            if (options.head) return result
+            if (params.head) return result
 
-            if (options.subscribe) {
+            if (params.subscribe) {
                 var subscribe_chain = Promise.resolve()
-                options.my_subscribe = (x) => subscribe_chain =
+                params.my_subscribe = (x) => subscribe_chain =
                     subscribe_chain.then(() =>
-                        !options.signal?.aborted && options.subscribe(x))
+                        !params.signal?.aborted && params.subscribe(x))
 
                 // Start a subscription for future updates
                 if (!braid_blob.key_to_subs[key])
                     braid_blob.key_to_subs[key] = new Map()
 
-                var peer = options.peer || Math.random().toString(36).slice(2)
+                var peer = params.peer || Math.random().toString(36).slice(2)
                 braid_blob.key_to_subs[key].set(peer, {
                     sendUpdate: (update) => {
-                        if (update.delete) options.my_subscribe(update)
-                        else if (compare_events(update.version[0], options.parents?.[0]) > 0)
-                            options.my_subscribe(update)
+                        if (update.delete) params.my_subscribe(update)
+                        else if (compare_events(update.version[0], params.parents?.[0]) > 0)
+                            params.my_subscribe(update)
                     }
                 })
 
-                options.signal?.addEventListener('abort', () => {
+                params.signal?.addEventListener('abort', () => {
                     braid_blob.key_to_subs[key].delete(peer)
                     if (!braid_blob.key_to_subs[key].size)
                         delete braid_blob.key_to_subs[key]
                 })
 
-                if (options.before_send_cb) await options.before_send_cb()
-                if (options.signal?.aborted) return
+                if (params.before_send_cb) await params.before_send_cb()
+                if (params.signal?.aborted) return
 
                 // Send an immediate update if needed
-                if (compare_events(result.version?.[0], options.parents?.[0]) > 0) {
+                if (compare_events(result.version?.[0], params.parents?.[0]) > 0) {
                     result.sent = true
-                    result.body = await (options.db || braid_blob.db).read(key)
-                    options.my_subscribe(result)
+                    result.body = await (params.db || braid_blob.db).read(key)
+                    params.my_subscribe(result)
                 }
             } else {
                 // If not subscribe, send the body now
-                result.body = await (options.db || braid_blob.db).read(key)
+                result.body = await (params.db || braid_blob.db).read(key)
             }
 
             return result
         })
     }
 
-    braid_blob.put = async (key, body, options = {}) => {
-        options = normalize_options(options)
+    braid_blob.put = async (key, body, params = {}) => {
+        params = normalize_params(params)
 
         // Handle URL case - make a remote PUT request
         if (key instanceof URL) {
-            var params = {
+            var fetch_params = {
                 method: 'PUT',
-                signal: options.signal,
+                signal: params.signal,
                 body
             }
-            if (!options.dont_retry)
-                params.retry = () => true
+            if (!params.dont_retry)
+                fetch_params.retry = () => true
             for (var x of ['headers', 'version', 'peer'])
-                if (options[x] != null) params[x] = options[x]
-            if (options.content_type)
-                params.headers = { ...params.headers,
-                    'Content-Type': options.content_type }
+                if (params[x] != null) fetch_params[x] = params[x]
+            if (params.content_type)
+                fetch_params.headers = { ...fetch_params.headers,
+                    'Content-Type': params.content_type }
 
-            return await braid_fetch(key.href, params)
+            return await braid_fetch(key.href, fetch_params)
         }
 
         await braid_blob.init()
-        if (options.signal?.aborted) return
+        if (params.signal?.aborted) return
 
         return await within_fiber(key, async () => {
             var meta = await get_meta(key)
-            if (options.signal?.aborted) return
+            if (params.signal?.aborted) return
 
-            var their_e = options.version ? options.version[0] :
+            var their_e = params.version ? params.version[0] :
                 // we'll give them a event id in this case
                 `${braid_blob.peer}-${max_seq('' + Date.now(),
                     meta.event ? increment_seq(get_event_seq(meta.event)) : '')}`
@@ -364,15 +364,15 @@ function create_braid_blob() {
             if (compare_events(their_e, meta.event) > 0) {
                 meta.event = their_e
 
-                if (!options.skip_write)
-                    await (options.db || braid_blob.db).write(key, body)
-                if (options.signal?.aborted) return
+                if (!params.skip_write)
+                    await (params.db || braid_blob.db).write(key, body)
+                if (params.signal?.aborted) return
 
-                if (options.content_type)
-                    meta.content_type = options.content_type
+                if (params.content_type)
+                    meta.content_type = params.content_type
 
                 save_meta(key, meta)
-                if (options.signal?.aborted) return
+                if (params.signal?.aborted) return
 
                 // Notify all subscriptions of the update
                 // (except the peer which made the PUT request itself)
@@ -383,7 +383,7 @@ function create_braid_blob() {
                 }
                 if (braid_blob.key_to_subs[key])
                     for (var [peer, sub] of braid_blob.key_to_subs[key].entries())
-                        if (!options.peer || options.peer !== peer)
+                        if (!params.peer || params.peer !== peer)
                             await sub.sendUpdate(update)
             }
 
@@ -391,35 +391,35 @@ function create_braid_blob() {
         })
     }
 
-    braid_blob.delete = async (key, options = {}) => {
-        options = normalize_options(options)
+    braid_blob.delete = async (key, params = {}) => {
+        params = normalize_params(params)
 
         // Handle URL case - make a remote DELETE request
         if (key instanceof URL) {
-            var params = {
+            var fetch_params = {
                 method: 'DELETE',
-                signal: options.signal
+                signal: params.signal
             }
-            if (!options.dont_retry)
-                params.retry = (res) => res.status !== 309 &&
+            if (!params.dont_retry)
+                fetch_params.retry = (res) => res.status !== 309 &&
                     res.status !== 404 && res.status !== 406
             for (var x of ['headers', 'peer'])
-                if (options[x] != null) params[x] = options[x]
-            if (options.content_type)
-                params.headers = { ...params.headers,
-                    'Accept': options.content_type }
+                if (params[x] != null) fetch_params[x] = params[x]
+            if (params.content_type)
+                fetch_params.headers = { ...fetch_params.headers,
+                    'Accept': params.content_type }
 
-            return await braid_fetch(key.href, params)
+            return await braid_fetch(key.href, fetch_params)
         }
 
         await braid_blob.init()
-        if (options.signal?.aborted) return
+        if (params.signal?.aborted) return
 
         return await within_fiber(key, async () => {
             var meta = await get_meta(key)
-            if (options.signal?.aborted) return
+            if (params.signal?.aborted) return
 
-            await (options.db || braid_blob.db).delete(key)
+            await (params.db || braid_blob.db).delete(key)
             await delete_meta(key)
 
             // Notify all subscriptions of the delete
@@ -430,7 +430,7 @@ function create_braid_blob() {
             }
             if (braid_blob.key_to_subs[key])
                 for (var [peer, sub] of braid_blob.key_to_subs[key].entries())
-                    if (!options.peer || options.peer !== peer)
+                    if (!params.peer || params.peer !== peer)
                         sub.sendUpdate(update)
         })
     }
@@ -728,9 +728,9 @@ function create_braid_blob() {
         return s
     }
 
-    function normalize_options(options = {}) {
-        if (!normalize_options.special) {
-            normalize_options.special = {
+    function normalize_params(params = {}) {
+        if (!normalize_params.special) {
+            normalize_params.special = {
                 version: 'version',
                 parents: 'parents',
                 'content-type': 'content_type',
@@ -740,28 +740,28 @@ function create_braid_blob() {
         }
 
         var normalized = {}
-        Object.assign(normalized, options)
+        Object.assign(normalized, params)
 
         // Normalize top-level accept to content_type
-        if (options.accept) {
-            normalized.content_type = options.accept
+        if (params.accept) {
+            normalized.content_type = params.accept
             delete normalized.accept
         }
 
-        if (options.headers) {
+        if (params.headers) {
             normalized.headers = {}
-            for (var [k, v] of (options.headers instanceof Headers ?
-                options.headers.entries() :
-                Object.entries(options.headers))) {
-                var s = normalize_options.special[k.toLowerCase()]
+            for (var [k, v] of (params.headers instanceof Headers ?
+                params.headers.entries() :
+                Object.entries(params.headers))) {
+                var s = normalize_params.special[k.toLowerCase()]
                 if (s) normalized[s] = v
                 else normalized.headers[k] = v
             }
         }
 
         // Normalize parent -> parents
-        if (options.parent)
-            normalized.parents = options.parent
+        if (params.parent)
+            normalized.parents = params.parent
 
         // Normalize version/parents: allow strings, wrap in array for internal use
         if (typeof normalized.version === 'string')
