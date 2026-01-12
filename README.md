@@ -52,7 +52,7 @@ Now open up http://localhost:8888 in your browser, to see the client.  Open two 
 
 Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an extension to HTTP for synchronization.
 
-### Braid-HTTP Headers
+### Special Braid-HTTP Headers
 
 | Header | Description |
 |--------|-------------|
