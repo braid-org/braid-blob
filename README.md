@@ -52,7 +52,7 @@ Now open up http://localhost:8888 in your browser, to see the client.  Open two 
 
 Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an extension to HTTP for synchronization.
 
-### Braid-Specific Headers
+### Braid-HTTP Headers
 
 | Header | Description |
 |--------|-------------|
@@ -63,7 +63,7 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 | `Accept-Subscribe` | Server indicates it supports subscriptions |
 | `Current-Version` | The version the server currently has |
 
-### GET - Retrieve a blob
+### GET retrieves a blob
 
 ```http
 GET /blob.png HTTP/1.1
@@ -84,7 +84,7 @@ Content-Length: 12345
 
 Returns `404 Not Found` if the blob doesn't exist.
 
-### GET with Subscribe - Real-time updates
+### GET with Subscribe syncs client with realtime updates
 
 Add `Subscribe: true` to receive updates whenever the blob changes:
 
@@ -120,7 +120,7 @@ Content-Length: 23456
 
 If the blob doesn't exist yet, `Current-Version` will be blank and no initial update is sent. If the blob is deleted, a `404` update is streamed.
 
-### PUT - Store a blob
+### PUT stores a blob
 
 ```http
 PUT /blob.png HTTP/1.1
@@ -141,7 +141,7 @@ Version: "carol-3"
 
 The PUT always succeeds, but if the sent version is eclipsed by the server's current version, the returned `Version` will be the server's version (not the one you sent).
 
-### DELETE - Remove a blob
+### DELETE removes a blob
 
 ```http
 DELETE /blob.png HTTP/1.1
