@@ -17,6 +17,9 @@ function sync(img) {
             var blob = new Blob([body], { type: content_type || 'image/png' })
             img.src = URL.createObjectURL(blob)
         },
+        on_delete: () => {
+            img.src = ''
+        },
         on_error: (error) => {
             console.error('Live image error for', url, error)
         }
