@@ -61,7 +61,7 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 | `Merge-Type` | Conflict resolution strategy; `aww` means "arbitrary-writer-wins" |
 | `Subscribe` | Request a persistent connection that streams updates |
 | `Accept-Subscribe` | Server indicates it supports subscriptions |
-| `Current-Version` | The version the server currently has |
+| `Current-Version` | The latest version on server, as of this message |
 
 ### GET retrieves a blob
 
