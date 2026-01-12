@@ -139,7 +139,7 @@ HTTP/1.1 200 OK
 Version: "carol-3"
 ```
 
-The PUT always succeeds, but if the sent version is eclipsed by the server's current version, the returned `Version` will be the server's version (not the one you sent).
+If the sent version is older or eclipsed by the server's current version, the returned `Version` will be the server's version (not the one you sent).
 
 ### DELETE removes a blob
 
