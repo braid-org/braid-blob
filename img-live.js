@@ -1,17 +1,17 @@
 // Braid-Blob Live Images
 // requires client.js
 
-var live_images = new Map() // img -> ac
+var live_images = new Map() // img -> { ac, client }
 
 function sync(img) {
     var url = img.src
     if (!url) return
-    if (live_images.has(img)) return
+
+    // Unsync first to handle attribute changes (e.g. droppable added/removed)
+    unsync(img)
 
     var ac = new AbortController()
-    live_images.set(img, ac)
-
-    braid_blob_client(url, {
+    var client = braid_blob_client(url, {
         signal: ac.signal,
         on_update: (body, content_type) => {
             var blob = new Blob([body], { type: content_type || 'image/png' })
@@ -21,14 +21,53 @@ function sync(img) {
             console.error('Live image error for', url, error)
         }
     })
+    live_images.set(img, { ac, client })
+
+    if (img.hasAttribute('droppable'))
+        make_droppable(img)
 }
 
 function unsync(img) {
-    var ac = live_images.get(img)
-    if (ac) {
-        ac.abort()
+    var entry = live_images.get(img)
+    if (entry) {
+        entry.ac.abort()
         live_images.delete(img)
     }
+}
+
+function make_droppable(img) {
+    img.addEventListener('dragenter', function(e) {
+        img.style.outline = '3px dashed #007bff'
+        img.style.outlineOffset = '3px'
+    })
+
+    img.addEventListener('dragleave', function(e) {
+        img.style.outline = ''
+        img.style.outlineOffset = ''
+    })
+
+    img.addEventListener('dragover', function(e) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+    })
+
+    img.addEventListener('drop', function(e) {
+        e.preventDefault()
+        img.style.outline = ''
+        img.style.outlineOffset = ''
+
+        var file = e.dataTransfer.files[0]
+        if (!file || !file.type.startsWith('image/')) return
+
+        var entry = live_images.get(img)
+        if (!entry) return
+
+        var reader = new FileReader()
+        reader.onload = function() {
+            entry.client.update(reader.result, file.type)
+        }
+        reader.readAsArrayBuffer(file)
+    })
 }
 
 var observer = new MutationObserver(function(mutations) {
@@ -47,10 +86,10 @@ var observer = new MutationObserver(function(mutations) {
                 node.querySelectorAll('img[live]').forEach(unsync)
             }
         })
-        if (mutation.type === 'attributes' && mutation.attributeName === 'live' && mutation.target.tagName === 'IMG') {
+        if (mutation.type === 'attributes' && mutation.target.tagName === 'IMG') {
             if (mutation.target.hasAttribute('live'))
                 sync(mutation.target)
-            else
+            else if (mutation.attributeName === 'live')
                 unsync(mutation.target)
         }
     })
@@ -66,7 +105,7 @@ function init() {
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['live']
+        attributeFilter: ['live', 'droppable']
     })
 
     document.querySelectorAll('img[live]').forEach(sync)
