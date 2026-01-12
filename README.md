@@ -283,7 +283,7 @@ A simple browser client is included for subscribing to blob updates.
 
 ```html
 <script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
-<script src="http://localhost:8888/client.js"></script>
+<script src="https://unpkg.com/braid-blob/client.js"></script>
 <img id="image"/>
 <script>
     braid_blob_client('http://localhost:8888/blob.png', {
@@ -312,6 +312,25 @@ Parameters:
   - `on_delete` - Callback when blob is deleted
   - `on_error(e)` - Callback for errors
   - `signal` - AbortSignal for cancellation
+
+## Live Image Polyfill
+
+A polyfill that automatically syncs any `<img>` element with a `live` attribute. Images update in real-time whenever the blob changes on the server.
+
+```html
+<script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
+<script src="https://unpkg.com/braid-blob/client.js"></script>
+<script src="https://unpkg.com/braid-blob/img-live.js"></script>
+
+<img live src="/blob.png">
+```
+
+That's it! The image will automatically stay synchronized with the server. When any client updates `/blob.png`, all `<img live src="/blob.png">` elements will update in real-time.
+
+The polyfill:
+- Observes the DOM for `<img live>` elements (added, removed, or attribute changes)
+- Creates a `braid_blob_client` subscription for each live image
+- Cleans up subscriptions when images are removed from the DOM
 
 ## Improving this Package
 
