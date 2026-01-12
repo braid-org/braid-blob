@@ -58,7 +58,7 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 |--------|-------------|
 | `Version` | Unique identifier for this version of the blob (e.g., `"alice-42"`) |
 | `Parents` | The previous version |
-| `Merge-Type` | How conflicts resolve consistently (*e.g.* `aww` for arbitrary-writer-wins) |
+| `Merge-Type` | How conflicts resolve consistently (*e.g.* `aww` for [arbitrary-writer-wins](https://braid.org/protocol/merge-types/aww)) |
 | `Subscribe` | In GET, subscribes client to all future changes |
 | `Accept-Subscribe` | Server indicates it supports subscriptions |
 | `Current-Version` | The latest version that the server is aware of |
