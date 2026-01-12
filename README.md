@@ -52,6 +52,17 @@ Now open up http://localhost:8888 in your browser, to see the client.  Open two 
 
 Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an extension to HTTP for synchronization.
 
+### Braid-Specific Headers
+
+| Header | Description |
+|--------|-------------|
+| `Version` | Unique identifier for this version of the blob (e.g., `"alice-42"`) |
+| `Parents` | Used to request updates newer than a known version |
+| `Merge-Type` | Conflict resolution strategy; `aww` means "arbitrary-writer-wins" |
+| `Subscribe` | Request a persistent connection that streams updates |
+| `Accept-Subscribe` | Server indicates it supports subscriptions |
+| `Current-Version` | The version the server currently has |
+
 ### GET - Retrieve a blob
 
 ```http
@@ -62,10 +73,16 @@ Response:
 
 ```http
 HTTP/1.1 200 OK
+Version: "alice-1"
 Content-Type: image/png
+Merge-Type: aww
+Accept-Subscribe: true
+Content-Length: 12345
 
 <binary data>
 ```
+
+Returns `404 Not Found` if the blob doesn't exist.
 
 ### GET with Subscribe - Real-time updates
 
@@ -83,6 +100,7 @@ HTTP/1.1 209 Subscription
 Subscribe: true
 Current-Version: "alice-1"
 
+HTTP 200 OK
 Version: "alice-1"
 Content-Type: image/png
 Merge-Type: aww
@@ -90,6 +108,7 @@ Content-Length: 12345
 
 <binary data>
 
+HTTP 200 OK
 Version: "bob-2"
 Content-Type: image/png
 Merge-Type: aww
@@ -99,6 +118,8 @@ Content-Length: 23456
 ...
 ```
 
+If the blob doesn't exist yet, `Current-Version` will be blank and no initial update is sent. If the blob is deleted, a `404` update is streamed.
+
 ### PUT - Store a blob
 
 ```http
@@ -106,15 +127,33 @@ PUT /blob.png HTTP/1.1
 Version: "carol-3"
 Content-Type: image/png
 Merge-Type: aww
+Content-Length: 34567
 
 <binary data>
 ```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Version: "carol-3"
+```
+
+The PUT always succeeds, but if the sent version is eclipsed by the server's current version, the returned `Version` will be the server's version (not the one you sent).
 
 ### DELETE - Remove a blob
 
 ```http
 DELETE /blob.png HTTP/1.1
 ```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+```
+
+Returns `200 OK` even if the blob didn't exist.
 
 ### Understanding versions
 
