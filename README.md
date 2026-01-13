@@ -178,97 +178,95 @@ var braid_blob = require('braid-blob')
 braid_blob.db_folder = './braid-blobs'       // Default: ./braid-blobs
 ```
 
-### Serve blobs to HTTP Requests (GET, PUT, and DELETE)
+### Examples
 
-Your app becomes a blob server with:
-
-```javascript
-braid_blob.serve(req, res, params)
-```
-
-This will synchronize the client issuing the given request and response with its blob on disk.
-
-Parameters:
-- `req` - HTTP request object
-- `res` - HTTP response object
-- `params` - Optional configuration object
-  - `key` - The blob on disk to sync with (default: `req.url`)
-
-### Sync a remotely served blob to disk
-
-Your app becomes a blob client with:
+#### Get a blob
 
 ```javascript
-braid_blob.sync(key, url, params)
+// Get a local blob:
+var {body, version, content_type} = await braid_blob.get('foo')
+
+// Get a remote blob:
+var {body, version, content_type} = await braid_blob.get(new URL('https://foo.bar/baz'))
+
+// Get a specific version of a remote blob:
+var {body} = await braid_blob.get(
+    new URL('https://foo.bar/baz'),
+    {version: ['5zb2sjdstmk-1768093765048']}
+)
+
+// To subscribe to a remote blob, without storing updates locally:
+await braid_blob.get(new URL('https://foo.bar/baz'), {
+    subscribe: (update) => {
+        console.log('Got update:', update.version, update.content_type)
+        // update.body contains the new blob data
+    }
+})
+
+// To mirror a remote blob to local storage (bidirectional sync):
+var ac = new AbortController()
+braid_blob.sync('local-key', new URL('https://foo.bar/baz'), {signal: ac.signal})
+// Later, stop syncing:
+ac.abort()
 ```
 
-Synchronizes a remote URL to its blob on disk.
+Note: `.get()` with `subscribe` receives updates but does not store them locally.  `.sync()` performs two subscriptions (local↔remote) plus auto-forwards updates in both directions.
 
-Parameters:
-- `key` - The blob on disk (string)
-- `url` - Remote URL (URL object)
-- `params` - Optional configuration object
-  - `signal` - AbortSignal for cancellation (use to stop sync)
-  - `content_type` - Content type for requests
-
-### Read, Write or Delete a blob
-
-#### Read a local or remote blob
+#### Put a blob
 
 ```javascript
-braid_blob.get(key, params)
+// Write to a local blob:
+await braid_blob.put('foo', Buffer.from('hello'), {content_type: 'text/plain'})
+
+// Write to a remote blob:
+await braid_blob.put(
+    new URL('https://foo.bar/baz'),
+    Buffer.from('hello'),
+    {content_type: 'text/plain'}
+)
 ```
+
+#### Delete a blob
+
+```javascript
+// Delete a local blob:
+await braid_blob.delete('foo')
+
+// Delete a remote blob:
+await braid_blob.delete(new URL('https://foo.bar/baz'))
+```
+
+### API Reference
+
+#### braid_blob.get(key, params)
 
 Retrieves a blob from local storage or a remote URL.
-
-Examples:
-```javascript
-// Get the current contents of a local blob:
-braid_blob.get('foo').body
-
-// Get the contents of a remote blob:
-braid_blob.get(new URL('https://foo.bar/baz')).body
-
-// Get an old version of a remote blob:
-braid_blob.get(
-   new URL('https://foo.bar/baz'),
-   {version: ["5zb2sjdstmk-1768093765048"]}
-).body
-```
 
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
 - `params` - Optional configuration object
-  - `version` - Version ID to check existence (use with `head: true`)
-  - `parent` - Version ID; when subscribing, only receive updates newer than this
-  - `subscribe` - Callback function for real-time updates
-  - `head` - If true, returns only metadata (version, content_type) without body
-  - `content_type` - Content type for the request
-  - `signal` - AbortSignal for cancellation
+  - `version` - Retrieve a specific version instead of the latest (e.g., `['abc-123']`)
+  - `parents` - When subscribing, only receive updates newer than this version (e.g., `['abc-123']`)
+  - `subscribe` - Callback `(update) => {}` called with each update; `update` has `{body, version, content_type}`
+  - `head` - If `true`, returns only metadata (`{version, content_type}`) without the body—useful for checking if a blob exists or getting its current version
+  - `content_type` - Expected content type (sent as Accept header for remote URLs)
+  - `signal` - AbortSignal to cancel the request or stop a subscription
 
-Returns: `{version, body, content_type}` object, or `null` if not found.
+Returns: `{version, body, content_type}` object, or `null` if the blob doesn't exist.  When subscribing to a remote URL, returns the fetch response object; updates are delivered via the callback.
 
-#### Write a local or remote blob
+#### braid_blob.put(key, body, params)
 
-```javascript
-braid_blob.put(key, body, params)
-```
-
-Writes a blob to local storage or a remote URL.  Any other peers synchronizing with this blob (via `.serve()`, `.sync()`, or `.get(.., {subscribe: ..}`) will be updated.
+Writes a blob to local storage or a remote URL.  Any other peers synchronizing with this blob (via `.serve()`, `.sync()`, or `.get(.., {subscribe: ..})`) will be updated.
 
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
-- `body` - Buffer or data to store
+- `body` - The data to store (Buffer, ArrayBuffer, or Uint8Array)
 - `params` - Optional configuration object
-  - `version` - Version identifier
-  - `content_type` - Content type of the blob
-  - `signal` - AbortSignal for cancellation
+  - `version` - Specify a version ID for this write (e.g., `['my-version-1']`); if omitted, one is generated automatically
+  - `content_type` - MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
+  - `signal` - AbortSignal to cancel the request
 
-#### Delete a local or remote blob
-
-```javascript
-braid_blob.delete(key, params)
-```
+#### braid_blob.delete(key, params)
 
 Deletes a blob from local storage or a remote URL.
 
@@ -276,6 +274,27 @@ Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to delete
 - `params` - Optional configuration object
   - `signal` - AbortSignal for cancellation
+
+#### braid_blob.sync(key, url, params)
+
+Synchronizes a remote URL bidirectionally with a local blob on disk.  This performs two subscriptions (one to the remote, one to the local blob) and auto-forwards updates in both directions.
+
+Parameters:
+- `key` - The local blob on disk (string)
+- `url` - Remote URL (URL object)
+- `params` - Optional configuration object
+  - `signal` - AbortSignal for cancellation (use to stop sync)
+  - `content_type` - Content type for requests
+
+#### braid_blob.serve(req, res, params)
+
+Serves blob requests over HTTP.  Synchronizes the client issuing the given request with its blob on disk.
+
+Parameters:
+- `req` - HTTP request object
+- `res` - HTTP response object
+- `params` - Optional configuration object
+  - `key` - The blob on disk to sync with (default: the path from `req.url`)
 
 ## Browser Client API
 
