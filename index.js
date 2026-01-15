@@ -152,6 +152,7 @@ function create_braid_blob() {
                     header_cb: (result) => {
                         res.setHeader((req.subscribe ? "Current-" : "") +
                             "Version", version_to_header(result.version))
+                        res.setHeader("Version-Type", "relative-wallclock")
                         if (result.content_type)
                             res.setHeader('Content-Type', result.content_type)
                     },
@@ -166,6 +167,7 @@ function create_braid_blob() {
                             delete update.content_type
                         }
                         update['Merge-Type'] = 'aww'
+                        update['Version-Type'] = 'relative-wallclock'
                         res.sendUpdate(update)
                     } : null
                 })
@@ -204,6 +206,7 @@ function create_braid_blob() {
                 peer: req.peer
             })
             res.setHeader("Current-Version", version_to_header(event != null ? [event] : []))
+            res.setHeader("Version-Type", "relative-wallclock")
             res.end('')
         } else if (req.method === 'DELETE') {
             await braid_blob.delete(params.key, {
@@ -234,6 +237,9 @@ function create_braid_blob() {
             if (params.content_type)
                 fetch_params.headers = { ...fetch_params.headers,
                     'Accept': params.content_type }
+            if (params.version || params.parents)
+                fetch_params.headers = { ...fetch_params.headers,
+                    'Version-Type': 'relative-wallclock' }
 
             var res = await braid_fetch(key.href, fetch_params)
 
@@ -345,6 +351,9 @@ function create_braid_blob() {
             if (params.content_type)
                 fetch_params.headers = { ...fetch_params.headers,
                     'Content-Type': params.content_type }
+            if (params.version)
+                fetch_params.headers = { ...fetch_params.headers,
+                    'Version-Type': 'relative-wallclock' }
 
             return await braid_fetch(key.href, fetch_params)
         }
@@ -358,8 +367,7 @@ function create_braid_blob() {
 
             var their_e = params.version ? params.version[0] :
                 // we'll give them a event id in this case
-                `${braid_blob.peer}-${max_seq('' + Date.now(),
-                    meta.event ? increment_seq(get_event_seq(meta.event)) : '')}`
+                create_event(meta.event)
 
             if (compare_events(their_e, meta.event) > 0) {
                 meta.event = their_e
@@ -591,42 +599,71 @@ function create_braid_blob() {
         return 0
     }
 
+    function create_event(current_event, max_entropy = 1000) {
+        var new_event = '' + Date.now()
+
+        var current_seq = get_event_seq(current_event)
+        if (compare_seqs(new_event, current_seq) > 0) return new_event
+
+        // Find smallest base-10 integer where compare_seqs(int, current_seq) >= 0
+        var base = seq_to_int(current_seq)
+        return '' + (base + 1 + Math.floor(Math.random() * max_entropy))
+    }
+
     function get_event_seq(e) {
         if (!e) return ''
 
         for (let i = e.length - 1; i >= 0; i--)
-            if (e[i] === '-') return e.slice(i + 1)
+            if (e[i] === '-') return i == 0 ? e : e.slice(i + 1)
         return e
-    }
-
-    function increment_seq(s) {
-        if (!s) return '1'
-
-        let last = s[s.length - 1]
-        let rest = s.slice(0, -1)
-
-        if (last >= '0' && last <= '8')
-            return rest + String.fromCharCode(last.charCodeAt(0) + 1)
-        else
-            return increment_seq(rest) + '0'
-    }
-
-    function max_seq(a, b) {
-        if (!a) a = ''
-        if (!b) b = ''
-
-        if (compare_seqs(a, b) > 0) return a
-        return b
     }
 
     function compare_seqs(a, b) {
         if (!a) a = ''
         if (!b) b = ''
 
+        var a_neg = a[0] === '-'
+        var b_neg = b[0] === '-'
+        if (a_neg !== b_neg) return a_neg ? -1 : 1
+
+        // Both negative: compare magnitudes (reversed)
+        if (a_neg) {
+            var swap = a.slice(1); a = b.slice(1); b = swap
+        }
+
         if (a.length !== b.length) return a.length - b.length
         if (a < b) return -1
         if (a > b) return 1
         return 0
+    }
+
+    // Smallest base-10 integer n where compare_seqs(String(n), s) >= 0
+    function seq_to_int(s) {
+        if (!s || s[0] === '-') return 0
+
+        var len = s.length
+        var min_of_len = Math.pow(10, len - 1) // e.g., len=3 -> 100
+        var max_of_len = Math.pow(10, len) - 1 // e.g., len=3 -> 999
+
+        if (s < String(min_of_len)) return min_of_len
+        if (s > String(max_of_len)) return max_of_len + 1
+
+        // s is in the base-10 range for this length
+        // scan for first non-digit > '9', increment prefix and pad zeros
+        var n = 0
+        for (var i = 0; i < len; i++) {
+            var c = s.charCodeAt(i)
+            if (c >= 48 && c <= 57) {
+                n = n * 10 + (c - 48)
+            } else if (c > 57) {
+                // non-digit > '9': increment prefix, pad rest with zeros
+                return (n + 1) * Math.pow(10, len - i)
+            } else {
+                // non-digit < '0': just pad rest with zeros
+                return n * Math.pow(10, len - i)
+            }
+        }
+        return n
     }
 
     function ascii_ify(s) {

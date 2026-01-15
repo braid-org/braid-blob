@@ -51,9 +51,7 @@ function braid_blob_client(url, params = {}) {
 
     return {
         update: async (body, content_type) => {
-            var seq = max_seq('' + Date.now(),
-                increment_seq(get_event_seq(current_version)))
-            current_version = `${peer}-${seq}`
+            current_version = create_event(current_version)
 
             params.on_update?.(body, content_type, current_version)
 
@@ -80,41 +78,70 @@ function braid_blob_client(url, params = {}) {
         return 0
     }
 
+    function create_event(current_event, max_entropy = 1000) {
+        var new_event = '' + Date.now()
+
+        var current_seq = get_event_seq(current_event)
+        if (compare_seqs(new_event, current_seq) > 0) return new_event
+
+        // Find smallest base-10 integer where compare_seqs(int, current_seq) >= 0
+        var base = seq_to_int(current_seq)
+        return '' + (base + 1 + Math.floor(Math.random() * max_entropy))
+    }
+
     function get_event_seq(e) {
         if (!e) return ''
 
         for (let i = e.length - 1; i >= 0; i--)
-            if (e[i] === '-') return e.slice(i + 1)
+            if (e[i] === '-') return i == 0 ? e : e.slice(i + 1)
         return e
-    }
-
-    function increment_seq(s) {
-        if (!s) return '1'
-
-        let last = s[s.length - 1]
-        let rest = s.slice(0, -1)
-
-        if (last >= '0' && last <= '8')
-            return rest + String.fromCharCode(last.charCodeAt(0) + 1)
-        else
-            return increment_seq(rest) + '0'
-    }
-
-    function max_seq(a, b) {
-        if (!a) a = ''
-        if (!b) b = ''
-
-        if (compare_seqs(a, b) > 0) return a
-        return b
     }
 
     function compare_seqs(a, b) {
         if (!a) a = ''
         if (!b) b = ''
 
+        var a_neg = a[0] === '-'
+        var b_neg = b[0] === '-'
+        if (a_neg !== b_neg) return a_neg ? -1 : 1
+
+        // Both negative: compare magnitudes (reversed)
+        if (a_neg) {
+            var swap = a.slice(1); a = b.slice(1); b = swap
+        }
+
         if (a.length !== b.length) return a.length - b.length
         if (a < b) return -1
         if (a > b) return 1
         return 0
+    }
+
+    // Smallest base-10 integer n where compare_seqs(String(n), s) >= 0
+    function seq_to_int(s) {
+        if (!s || s[0] === '-') return 0
+
+        var len = s.length
+        var min_of_len = Math.pow(10, len - 1) // e.g., len=3 -> 100
+        var max_of_len = Math.pow(10, len) - 1 // e.g., len=3 -> 999
+
+        if (s < String(min_of_len)) return min_of_len
+        if (s > String(max_of_len)) return max_of_len + 1
+
+        // s is in the base-10 range for this length
+        // scan for first non-digit > '9', increment prefix and pad zeros
+        var n = 0
+        for (var i = 0; i < len; i++) {
+            var c = s.charCodeAt(i)
+            if (c >= 48 && c <= 57) {
+                n = n * 10 + (c - 48)
+            } else if (c > 57) {
+                // non-digit > '9': increment prefix, pad rest with zeros
+                return (n + 1) * Math.pow(10, len - i)
+            } else {
+                // non-digit < '0': just pad rest with zeros
+                return n * Math.pow(10, len - i)
+            }
+        }
+        return n
     }
 }

@@ -56,7 +56,8 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 
 | Header | Description |
 |--------|-------------|
-| `Version` | Unique identifier for this version of the blob (e.g., `"alice-42"`) |
+| `Version` | Unique identifier for this version of the blob (e.g., `"1768467700000"`) |
+| `Version-Type` | How to interpret the structure of version strings (e.g., `relative-wallclock`); see [Version-Type spec](https://github.com/braid-org/braid-spec/blob/master/draft-toomim-httpbis-versions-03.txt) |
 | `Parents` | The previous version |
 | `Merge-Type` | How conflicts resolve consistently (*e.g.* `aww` for [arbitrary-writer-wins](https://braid.org/protocol/merge-types/aww)) |
 | `Subscribe` | In GET, subscribes client to all future changes |
@@ -73,7 +74,8 @@ Response:
 
 ```http
 HTTP/1.1 200 OK
-Version: "alice-1"
+Version: "1768467700000"
+Version-Type: relative-wallclock
 Content-Type: image/png
 Merge-Type: aww
 Accept-Subscribe: true
@@ -98,10 +100,12 @@ Response (keeps connection open, streams updates):
 ```http
 HTTP/1.1 209 Multiresponse
 Subscribe: true
-Current-Version: "alice-1"
+Current-Version: "1768467700000"
+Version-Type: relative-wallclock
 
 HTTP 200 OK
-Version: "alice-1"
+Version: "1768467700000"
+Version-Type: relative-wallclock
 Content-Type: image/png
 Merge-Type: aww
 Content-Length: 12345
@@ -109,7 +113,8 @@ Content-Length: 12345
 <binary data>
 
 HTTP 200 OK
-Version: "bob-2"
+Version: "1768467701000"
+Version-Type: relative-wallclock
 Content-Type: image/png
 Merge-Type: aww
 Content-Length: 23456
@@ -124,7 +129,8 @@ If the blob doesn't exist yet, `Current-Version` will be blank and no initial up
 
 ```http
 PUT /blob.png HTTP/1.1
-Version: "carol-3"
+Version: "1768467702000"
+Version-Type: relative-wallclock
 Content-Type: image/png
 Merge-Type: aww
 Content-Length: 34567
@@ -136,7 +142,8 @@ Response:
 
 ```http
 HTTP/1.1 200 OK
-Current-Version: "carol-3"
+Current-Version: "1768467702000"
+Version-Type: relative-wallclock
 ```
 
 If the sent version is older or eclipsed by the server's current version, the returned `Current-Version` will be the server's version (not the one you sent).
@@ -159,11 +166,9 @@ Returns `200 OK` even if the blob didn't exist.
 
 ### Understanding versions
 
-Versions look like `"alice-42"` where:
-- `alice` is a peer ID (identifies who made the change)
-- `42` is a sequence number (generally milliseconds past the epoch, or one plus the current number if it is past the current time)
+Versions are timestamps representing milliseconds past the epoch (e.g., `"1768467700000"`). If the current time is less than the latest known version, a small random number is added to the current version to provide entropy in case multiple peers are writing simultaneously.
 
-Conflicts resolve using ["arbitrary-writer-wins" (AWW)](https://braid.org/protocol/merge-types/aww): the version with the highest sequence number wins. If sequences match, the peer ID string is compared lexicographically.
+Conflicts resolve using ["arbitrary-writer-wins" (AWW)](https://braid.org/protocol/merge-types/aww): the version with the highest timestamp wins.
 
 
 
