@@ -57,7 +57,7 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 | Header | Description |
 |--------|-------------|
 | `Version` | Unique identifier for this version of the blob (e.g., `"1768467700000"`) |
-| `Version-Type` | How to interpret the structure of version strings (e.g., `relative-wallclock`); see [Version-Type spec](https://github.com/braid-org/braid-spec/blob/master/draft-toomim-httpbis-versions-03.txt) |
+| `Version-Type` | How to interpret the structure of version strings (e.g., [`relative-wallclock`](https://braid.org/protocol/version-types/relative-wallclock)); see [Version-Type spec](https://github.com/braid-org/braid-spec/blob/master/draft-toomim-httpbis-versions-03.txt) |
 | `Parents` | The previous version |
 | `Merge-Type` | How conflicts resolve consistently (*e.g.* `aww` for [arbitrary-writer-wins](https://braid.org/protocol/merge-types/aww)) |
 | `Subscribe` | In GET, subscribes client to all future changes |
@@ -164,11 +164,19 @@ HTTP/1.1 200 OK
 
 Returns `200 OK` even if the blob didn't exist.
 
-### Understanding versions
+### Understanding versions and conflict resolution
 
-Versions are timestamps representing milliseconds past the epoch (e.g., `"1768467700000"`). If the current time is less than the latest known version, a small random number is added to the current version to provide entropy in case multiple peers are writing simultaneously.
+Braid-blob uses two complementary mechanisms for distributed consistency:
 
-Conflicts resolve using ["arbitrary-writer-wins" (AWW)](https://braid.org/protocol/merge-types/aww): the version with the highest timestamp wins.
+**Version-Type: [`relative-wallclock`](https://braid.org/protocol/version-types/relative-wallclock)** defines the format and interpretation of version identifiers:
+- Versions are millisecond timestamps (e.g., `"1768467700000"`)
+- If the current time is behind the latest known version, a small random number (1-1000) is added to the current version, providing entropy when multiple peers write simultaneously
+- Versions are compared numerically—larger timestamps are newer
+
+**Merge-Type: [`aww`](https://braid.org/protocol/merge-types/aww)** (arbitrary-writer-wins) defines how conflicts are resolved:
+- When two peers make concurrent changes, the version with the higher timestamp wins
+- All peers deterministically converge to the same state without coordination
+- This provides "last-writer-wins" semantics under normal clock conditions
 
 
 
@@ -197,7 +205,7 @@ var {body, version, content_type} = await braid_blob.get(new URL('https://foo.ba
 // Get a specific version of a remote blob:
 var {body} = await braid_blob.get(
     new URL('https://foo.bar/baz'),
-    {version: ['5zb2sjdstmk-1768093765048']}
+    {version: ['1768467700000']}
 )
 
 // To subscribe to a remote blob, without storing updates locally:
@@ -250,8 +258,8 @@ Retrieves a blob from local storage or a remote URL.
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
 - `params` - Optional configuration object
-  - `version` - Retrieve a specific version instead of the latest (e.g., `['abc-123']`)
-  - `parents` - When subscribing, only receive updates newer than this version (e.g., `['abc-123']`)
+  - `version` - Retrieve a specific version instead of the latest (e.g., `['1768467700000']`)
+  - `parents` - When subscribing, only receive updates newer than this version (e.g., `['1768467700000']`)
   - `subscribe` - Callback `(update) => {}` called with each update; `update` has `{body, version, content_type}`
   - `head` - If `true`, returns only metadata (`{version, content_type}`) without the body—useful for checking if a blob exists or getting its current version
   - `content_type` - Expected content type (sent as Accept header for remote URLs)
@@ -267,7 +275,7 @@ Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
 - `body` - The data to store (Buffer, ArrayBuffer, or Uint8Array)
 - `params` - Optional configuration object
-  - `version` - Specify a version ID for this write (e.g., `['my-version-1']`); if omitted, one is generated automatically
+  - `version` - Specify a version ID for this write (e.g., `['1768467700000']`); if omitted, one is generated automatically
   - `content_type` - MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
   - `signal` - AbortSignal to cancel the request
 
