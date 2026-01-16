@@ -56,8 +56,8 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 
 | Header | Description |
 |--------|-------------|
-| `Version` | Unique identifier for this version of the blob (e.g., `"1768467700000"`) |
-| `Version-Type` | How to interpret the structure of version strings (e.g., [`relative-wallclock`](https://braid.org/protocol/version-types/relative-wallclock)); see [Version-Type spec](https://github.com/braid-org/braid-spec/blob/master/draft-toomim-httpbis-versions-03.txt) |
+| `Version` | Unique identifier for this version of the blob (e.g., `"1768467700.000"`) |
+| `Version-Type` | How to interpret the structure of version strings (e.g., [`wallclockish`](https://braid.org/protocol/version-types/wallclockish)); see [Version-Type spec](https://github.com/braid-org/braid-spec/blob/master/draft-toomim-httpbis-versions-03.txt) |
 | `Parents` | The previous version |
 | `Merge-Type` | How conflicts resolve consistently (*e.g.* `aww` for [arbitrary-writer-wins](https://braid.org/protocol/merge-types/aww)) |
 | `Subscribe` | In GET, subscribes client to all future changes |
@@ -74,8 +74,8 @@ Response:
 
 ```http
 HTTP/1.1 200 OK
-Version: "1768467700000"
-Version-Type: relative-wallclock
+Version: "1768467700.000"
+Version-Type: wallclockish
 Content-Type: image/png
 Merge-Type: aww
 Accept-Subscribe: true
@@ -100,12 +100,12 @@ Response (keeps connection open, streams updates):
 ```http
 HTTP/1.1 209 Multiresponse
 Subscribe: true
-Current-Version: "1768467700000"
-Version-Type: relative-wallclock
+Current-Version: "1768467700.000"
+Version-Type: wallclockish
 
 HTTP 200 OK
-Version: "1768467700000"
-Version-Type: relative-wallclock
+Version: "1768467700.000"
+Version-Type: wallclockish
 Content-Type: image/png
 Merge-Type: aww
 Content-Length: 12345
@@ -113,8 +113,8 @@ Content-Length: 12345
 <binary data>
 
 HTTP 200 OK
-Version: "1768467701000"
-Version-Type: relative-wallclock
+Version: "1768467700.100"
+Version-Type: wallclockish
 Content-Type: image/png
 Merge-Type: aww
 Content-Length: 23456
@@ -129,8 +129,8 @@ If the blob doesn't exist yet, `Current-Version` will be blank and no initial up
 
 ```http
 PUT /blob.png HTTP/1.1
-Version: "1768467702000"
-Version-Type: relative-wallclock
+Version: "1768467700.200"
+Version-Type: wallclockish
 Content-Type: image/png
 Merge-Type: aww
 Content-Length: 34567
@@ -142,8 +142,8 @@ Response:
 
 ```http
 HTTP/1.1 200 OK
-Current-Version: "1768467702000"
-Version-Type: relative-wallclock
+Current-Version: "1768467700.200"
+Version-Type: wallclockish
 ```
 
 If the sent version is older or eclipsed by the server's current version, the returned `Current-Version` will be the server's version (not the one you sent).
@@ -168,9 +168,9 @@ Returns `200 OK` even if the blob didn't exist.
 
 Braid-blob uses two complementary mechanisms for distributed consistency:
 
-**Version-Type: [`relative-wallclock`](https://braid.org/protocol/version-types/relative-wallclock)** defines the format and interpretation of version identifiers:
-- Versions are millisecond timestamps (e.g., `"1768467700000"`)
-- If the current time is behind the latest known version, a small random number (1-1000) is added to the current version, providing entropy when multiple peers write simultaneously
+**Version-Type: [`wallclockish`](https://braid.org/protocol/version-types/wallclockish)** defines the format and interpretation of version identifiers:
+- Versions are seconds since the epoch with decimal precision (e.g., `"1768467700.000"`)
+- If the current time is behind the latest known version, a small random decimal is added to the current version, providing entropy when multiple peers write simultaneously
 - Versions are compared numerically—larger timestamps are newer
 
 **Merge-Type: [`aww`](https://braid.org/protocol/merge-types/aww)** (arbitrary-writer-wins) defines how conflicts are resolved:
@@ -205,7 +205,7 @@ var {body, version, content_type} = await braid_blob.get(new URL('https://foo.ba
 // Get a specific version of a remote blob:
 var {body} = await braid_blob.get(
     new URL('https://foo.bar/baz'),
-    {version: ['1768467700000']}
+    {version: ['1768467700.000']}
 )
 
 // To subscribe to a remote blob, without storing updates locally:
@@ -258,8 +258,8 @@ Retrieves a blob from local storage or a remote URL.
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
 - `params` - Optional configuration object
-  - `version` - Retrieve a specific version instead of the latest (e.g., `['1768467700000']`)
-  - `parents` - When subscribing, only receive updates newer than this version (e.g., `['1768467700000']`)
+  - `version` - Retrieve a specific version instead of the latest (e.g., `['1768467700.000']`)
+  - `parents` - When subscribing, only receive updates newer than this version (e.g., `['1768467700.000']`)
   - `subscribe` - Callback `(update) => {}` called with each update; `update` has `{body, version, content_type}`
   - `head` - If `true`, returns only metadata (`{version, content_type}`) without the body—useful for checking if a blob exists or getting its current version
   - `content_type` - Expected content type (sent as Accept header for remote URLs)
@@ -275,7 +275,7 @@ Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
 - `body` - The data to store (Buffer, ArrayBuffer, or Uint8Array)
 - `params` - Optional configuration object
-  - `version` - Specify a version ID for this write (e.g., `['1768467700000']`); if omitted, one is generated automatically
+  - `version` - Specify a version ID for this write (e.g., `['1768467700.000']`); if omitted, one is generated automatically
   - `content_type` - MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
   - `signal` - AbortSignal to cancel the request
 

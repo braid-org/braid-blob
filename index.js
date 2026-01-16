@@ -152,7 +152,7 @@ function create_braid_blob() {
                     header_cb: (result) => {
                         res.setHeader((req.subscribe ? "Current-" : "") +
                             "Version", version_to_header(result.version))
-                        res.setHeader("Version-Type", "relative-wallclock")
+                        res.setHeader("Version-Type", "wallclockish")
                         if (result.content_type)
                             res.setHeader('Content-Type', result.content_type)
                     },
@@ -167,7 +167,7 @@ function create_braid_blob() {
                             delete update.content_type
                         }
                         update['Merge-Type'] = 'aww'
-                        update['Version-Type'] = 'relative-wallclock'
+                        update['Version-Type'] = 'wallclockish'
                         res.sendUpdate(update)
                     } : null
                 })
@@ -206,7 +206,7 @@ function create_braid_blob() {
                 peer: req.peer
             })
             res.setHeader("Current-Version", version_to_header(event != null ? [event] : []))
-            res.setHeader("Version-Type", "relative-wallclock")
+            res.setHeader("Version-Type", "wallclockish")
             res.end('')
         } else if (req.method === 'DELETE') {
             await braid_blob.delete(params.key, {
@@ -239,7 +239,7 @@ function create_braid_blob() {
                     'Accept': params.content_type }
             if (params.version || params.parents)
                 fetch_params.headers = { ...fetch_params.headers,
-                    'Version-Type': 'relative-wallclock' }
+                    'Version-Type': 'wallclockish' }
 
             var res = await braid_fetch(key.href, fetch_params)
 
@@ -353,7 +353,7 @@ function create_braid_blob() {
                     'Content-Type': params.content_type }
             if (params.version)
                 fetch_params.headers = { ...fetch_params.headers,
-                    'Version-Type': 'relative-wallclock' }
+                    'Version-Type': 'wallclockish' }
 
             return await braid_fetch(key.href, fetch_params)
         }
@@ -591,79 +591,70 @@ function create_braid_blob() {
         if (!a) a = ''
         if (!b) b = ''
 
-        var c = compare_seqs(get_event_seq(a), get_event_seq(b))
-        if (c) return c
+        // Check if values match wallclockish format
+        var re = compare_events.re || (compare_events.re = /^-?[0-9]*\.[0-9]*$/)
+        var a_match = re.test(a)
+        var b_match = re.test(b)
 
-        if (a < b) return -1
-        if (a > b) return 1
+        // If only one matches, it wins
+        if (a_match && !b_match) return 1
+        if (b_match && !a_match) return -1
+
+        // If neither matches, compare lexicographically
+        if (!a_match && !b_match) {
+            if (a < b) return -1
+            if (a > b) return 1
+            return 0
+        }
+
+        // Both match - compare as decimals using BigInt
+        // Add decimal point if missing
+        if (a.indexOf('.') === -1) a += '.'
+        if (b.indexOf('.') === -1) b += '.'
+
+        // Pad the shorter fractional part with zeros
+        var diff = (a.length - a.indexOf('.')) - (b.length - b.indexOf('.'))
+        if (diff < 0) a += '0'.repeat(-diff)
+        else if (diff > 0) b += '0'.repeat(diff)
+
+        // Remove decimal and parse as BigInt
+        var a_big = BigInt(a.replace('.', ''))
+        var b_big = BigInt(b.replace('.', ''))
+
+        if (a_big < b_big) return -1
+        if (a_big > b_big) return 1
         return 0
     }
 
-    function create_event(current_event, max_entropy = 1000) {
-        var new_event = '' + Date.now()
+    function create_event(current_event, decimal_places=3, entropy_digits=4) {
+        var now = '' + Date.now() / 1000
+        if (compare_events(now, current_event) > 0)
+            return now
 
-        var current_seq = get_event_seq(current_event)
-        if (compare_seqs(new_event, current_seq) > 0) return new_event
+        // Add smallest increment to current_event using BigInt
+        var e = current_event || '0'
+        if (e.indexOf('.') === -1) e += '.'
 
-        // Find smallest base-10 integer where compare_seqs(int, current_seq) >= 0
-        var base = seq_to_int(current_seq)
-        return '' + (base + 1 + Math.floor(Math.random() * max_entropy))
+        // Truncate or pad to exactly decimal_places decimal places
+        var dot = e.indexOf('.')
+        var frac = e.slice(dot + 1)
+        if (frac.length > decimal_places) e = e.slice(0, dot + 1 + decimal_places)
+        else if (frac.length < decimal_places) e += '0'.repeat(decimal_places - frac.length)
+
+        var big = BigInt(e.replace('.', '')) + 1n
+        var str = String(big)
+
+        // Reinsert decimal point
+        var result = str.slice(0, -decimal_places) + '.' + str.slice(-decimal_places)
+
+        return result + random_digits(entropy_digits)
     }
 
-    function get_event_seq(e) {
-        if (!e) return ''
-
-        for (let i = e.length - 1; i >= 0; i--)
-            if (e[i] === '-') return i == 0 ? e : e.slice(i + 1)
-        return e
-    }
-
-    function compare_seqs(a, b) {
-        if (!a) a = ''
-        if (!b) b = ''
-
-        var a_neg = a[0] === '-'
-        var b_neg = b[0] === '-'
-        if (a_neg !== b_neg) return a_neg ? -1 : 1
-
-        // Both negative: compare magnitudes (reversed)
-        if (a_neg) {
-            var swap = a.slice(1); a = b.slice(1); b = swap
-        }
-
-        if (a.length !== b.length) return a.length - b.length
-        if (a < b) return -1
-        if (a > b) return 1
-        return 0
-    }
-
-    // Smallest base-10 integer n where compare_seqs(String(n), s) >= 0
-    function seq_to_int(s) {
-        if (!s || s[0] === '-') return 0
-
-        var len = s.length
-        var min_of_len = Math.pow(10, len - 1) // e.g., len=3 -> 100
-        var max_of_len = Math.pow(10, len) - 1 // e.g., len=3 -> 999
-
-        if (s < String(min_of_len)) return min_of_len
-        if (s > String(max_of_len)) return max_of_len + 1
-
-        // s is in the base-10 range for this length
-        // scan for first non-digit > '9', increment prefix and pad zeros
-        var n = 0
-        for (var i = 0; i < len; i++) {
-            var c = s.charCodeAt(i)
-            if (c >= 48 && c <= 57) {
-                n = n * 10 + (c - 48)
-            } else if (c > 57) {
-                // non-digit > '9': increment prefix, pad rest with zeros
-                return (n + 1) * Math.pow(10, len - i)
-            } else {
-                // non-digit < '0': just pad rest with zeros
-                return n * Math.pow(10, len - i)
-            }
-        }
-        return n
+    function random_digits(n) {
+        if (!n) return ''
+        var s = ''
+        for (var i = 0; i < n; i++) s += Math.floor(Math.random() * 10)
+        return s
     }
 
     function ascii_ify(s) {
@@ -791,7 +782,12 @@ function create_braid_blob() {
                 params.headers.entries() :
                 Object.entries(params.headers))) {
                 var s = normalize_params.special[k.toLowerCase()]
-                if (s) normalized[s] = v
+                if (s) {
+                    // Parse JSON-encoded header values for version/parents
+                    if ((s === 'version' || s === 'parents') && typeof v === 'string')
+                        try { v = JSON.parse(v) } catch (e) {}
+                    normalized[s] = v
+                }
                 else normalized.headers[k] = v
             }
         }
