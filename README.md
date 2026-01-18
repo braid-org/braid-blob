@@ -311,7 +311,7 @@ Parameters:
 
 ## Browser Client API
 
-A simple browser client is included for subscribing to blob updates.
+A simple browser client (`client.js`) is included for subscribing to blob updates. Here's how to use it:
 
 ```html
 <script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
