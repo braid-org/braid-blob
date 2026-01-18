@@ -46,7 +46,7 @@ node server-demo.js
 
 Now open up http://localhost:8888 in your browser, to see the client.  Open two windows.  You can drag and drop images between them, and they will always stay synchronized.
 
-<video src="https://github.com/user-attachments/assets/9416e06b-143a-4b3a-a840-b6484f2571b1" controls width="600"></video>
+<video src="https://github.com/user-attachments/assets/24f7be18-87ec-417d-bab5-beee48c5c442" controls width="600"></video>
 
 ## Network API
 
