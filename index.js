@@ -784,8 +784,8 @@ function create_braid_blob() {
                 var s = normalize_params.special[k.toLowerCase()]
                 if (s) {
                     // Parse JSON-encoded header values for version/parents
-                    if ((s === 'version' || s === 'parents') && typeof v === 'string')
-                        try { v = JSON.parse(v) } catch (e) {}
+                    if (s === 'version' || s === 'parents')
+                        v = JSON.parse('[' + v + ']')
                     normalized[s] = v
                 }
                 else normalized.headers[k] = v
@@ -801,8 +801,20 @@ function create_braid_blob() {
             normalized.version = [normalized.version]
         if (typeof normalized.parents === 'string')
             normalized.parents = [normalized.parents]
+        
+        // Validate version and parents
+        validate_version_array(normalized.version, 1)
+        validate_version_array(normalized.parents, 0)
 
         return normalized
+    }
+
+    function validate_version_array(x, min) {
+        if (!x) return
+        if (!Array.isArray(x)) throw new Error(`invalid version array: not an array`)
+        if (x.length < min) throw new Error(`invalid version array: must have an event id`)
+        if (x.length > 1) throw new Error(`invalid version array: can only have 1 event id`)
+        if (typeof x[0] !== 'string') throw new Error(`invalid version array: event id must be a string`)
     }
 
     async function atomic_write(final_destination, data, temp_folder) {

@@ -574,25 +574,6 @@ runTest(
 )
 
 runTest(
-    "test that PUTing at version [] doesn't do anything.",
-    async () => {
-        var key = 'test-' + Math.random().toString(36).slice(2)
-
-        var r = await braid_fetch(`/${key}`, {
-            method: 'PUT',
-            version: [],
-            parents: [],
-            body: 'xyz'
-        })
-        if (!r.ok) throw 'got: ' + r.statusCode
-
-        var r = await braid_fetch(`/${key}`)
-        return r.status
-    },
-    '404'
-)
-
-runTest(
     "test that subscribe sends no version if parents is big enough.",
     async () => {
         var key = 'test-' + Math.random().toString(36).slice(2)
@@ -2042,6 +2023,332 @@ runTest(
         return await r1.text()
     },
     'no update (correct)'
+)
+
+runTest(
+    "test version validation rejects non-array",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-nonarr-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: {not: 'an array'}  // Object instead of array
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('not an array') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test version validation rejects empty array",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-empty-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: []  // Empty array
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('must have an event id') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test version validation rejects multiple event ids",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-multi-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: ['1', '2']  // Multiple event ids
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('only have 1 event id') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test version validation rejects non-string event id",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-nonstr-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: [123]  // Number instead of string
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('must be a string') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test parents validation rejects non-array",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-parents-nonarr-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: ['1'],
+                        parents: {not: 'an array'}  // Object instead of array
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('not an array') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test parents validation rejects multiple event ids",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-parents-multi-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: ['1'],
+                        parents: ['0', '1']  // Multiple parent ids
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('only have 1 event id') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test parents validation allows empty array",
+    async () => {
+        var key = 'test-validate-parents-empty-' + Math.random().toString(36).slice(2)
+
+        var r = await braid_fetch(`/${key}`, {
+            method: 'PUT',
+            version: ['1'],
+            parents: [],  // Empty parents is allowed (min=0)
+            body: 'test'
+        })
+        if (!r.ok) return 'put failed: ' + r.status
+
+        var r2 = await braid_fetch(`/${key}`)
+        return await r2.text()
+    },
+    'test'
+)
+
+runTest(
+    "test parents validation rejects non-string event id",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-parents-nonstr-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: ['1'],
+                        parents: [123]  // Number instead of string
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('must be a string') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test version string is auto-wrapped in array",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-string-wrap-' + Math.random().toString(36).slice(2)
+                try {
+                    // String version should be auto-wrapped in array
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: 'my-version'
+                    })
+                    var result = await braid_blob.get(test_key)
+                    res.end(result.version[0] === 'my-version' ? 'ok' : 'wrong version: ' + result.version)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'ok'
+)
+
+runTest(
+    "test parents string is auto-wrapped in array",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-validate-parents-string-wrap-' + Math.random().toString(36).slice(2)
+                try {
+                    // Put initial version
+                    await braid_blob.put(test_key, Buffer.from('v1'), { version: ['1'] })
+
+                    // String parents should be auto-wrapped in array
+                    await braid_blob.put(test_key, Buffer.from('v2'), {
+                        version: ['2'],
+                        parents: '1'  // String instead of array
+                    })
+                    var result = await braid_blob.get(test_key)
+                    res.end(result.version[0] === '2' ? 'ok' : 'wrong version: ' + result.version)
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'ok'
+)
+
+runTest(
+    "test version passed via headers is parsed correctly",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-version-header-' + Math.random().toString(36).slice(2)
+                try {
+                    // Pass version via headers (JSON-encoded as per braid protocol)
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        headers: { 'Version': '"header-version-123"' }
+                    })
+                    var result = await braid_blob.get(test_key)
+                    res.end(result.version[0] === 'header-version-123' ? 'ok' : 'wrong version: ' + result.version[0])
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'ok'
+)
+
+runTest(
+    "test parents passed via headers is parsed correctly",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-parents-header-' + Math.random().toString(36).slice(2)
+                try {
+                    // Put initial version
+                    await braid_blob.put(test_key, Buffer.from('v1'), { version: ['1'] })
+
+                    // Pass parents via headers (JSON-encoded as per braid protocol)
+                    await braid_blob.put(test_key, Buffer.from('v2'), {
+                        version: ['2'],
+                        headers: { 'Parents': '"1"' }
+                    })
+                    var result = await braid_blob.get(test_key)
+                    res.end(result.version[0] === '2' ? 'ok' : 'wrong version: ' + result.version[0])
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'ok'
+)
+
+runTest(
+    "test version via headers validation rejects multiple event ids",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-version-header-multi-' + Math.random().toString(36).slice(2)
+                try {
+                    // Pass multiple versions via headers (should fail validation)
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        headers: { 'Version': '"v1", "v2"' }
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('only have 1 event id') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
+)
+
+runTest(
+    "test parents via headers validation rejects multiple event ids",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var test_key = '/test-parents-header-multi-' + Math.random().toString(36).slice(2)
+                try {
+                    await braid_blob.put(test_key, Buffer.from('test'), {
+                        version: ['1'],
+                        headers: { 'Parents': '"p1", "p2"' }
+                    })
+                    res.end('no error')
+                } catch (e) {
+                    res.end(e.message.includes('only have 1 event id') ? 'caught' : 'wrong error: ' + e.message)
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'caught'
 )
 
 runTest(
