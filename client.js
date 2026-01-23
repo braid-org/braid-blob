@@ -27,7 +27,7 @@ function braid_blob_client(url, params = {}) {
     braid_fetch(url, {
         headers: { "Merge-Type": "aww" },
         subscribe: true,
-        parents: () => [current_version],
+        parents: () => current_version,
         peer,
         retry: () => true,
         signal: params.signal
@@ -39,8 +39,8 @@ function braid_blob_client(url, params = {}) {
             }
 
             // Only update if version is newer
-            var version = update.version?.[0]
-            if (compare_events(version, current_version) > 0) {
+            var version = update.version
+            if (compare_events(version?.[0], current_version?.[0]) > 0) {
                 current_version = version
                 params.on_update?.(update.body,
                     update.extra_headers?.['content-type'],
@@ -51,13 +51,13 @@ function braid_blob_client(url, params = {}) {
 
     return {
         update: async (body, content_type) => {
-            current_version = create_event(current_version)
+            current_version = [create_event(current_version?.[0])]
 
             params.on_update?.(body, content_type, current_version)
 
             await braid_fetch(url, {
                 method: 'PUT',
-                version: [current_version],
+                version: current_version,
                 headers: { 'Content-Type': content_type },
                 peer,
                 retry: () => true,
