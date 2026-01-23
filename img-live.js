@@ -61,7 +61,6 @@ function sync(img) {
             var reader = new FileReader()
             reader.onload = async function() {
                 await client.update(reader.result, file.type)
-                img.src = ''
                 img.src = url
             }
             reader.readAsArrayBuffer(file)
