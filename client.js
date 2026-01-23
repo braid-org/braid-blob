@@ -4,7 +4,7 @@
 // Usage:
 //   var blob = braid_blob_client(url, {
 //       peer: 'my-peer-id', // optional, random if not set
-//       on_update: (body, content_type, version) => {
+//       on_update: (body, content_type, version, from_local_update) => {
 //           // Called whenever there's a new version of the blob
 //           console.log('New blob:', body, content_type, version)
 //       },
@@ -53,7 +53,7 @@ function braid_blob_client(url, params = {}) {
         update: async (body, content_type) => {
             current_version = [create_event(current_version?.[0])]
 
-            params.on_update?.(body, content_type, current_version)
+            params.on_update?.(body, content_type, current_version, true)
 
             await braid_fetch(url, {
                 method: 'PUT',

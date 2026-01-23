@@ -15,12 +15,18 @@ function sync(img) {
     var ac = new AbortController()
     var client = braid_blob_client(url, {
         signal: ac.signal,
-        on_update: (body, content_type) => {
-            var blob = new Blob([body], { type: content_type || 'image/png' })
-            img.src = URL.createObjectURL(blob)
+        on_update: (body, content_type, version, from_local_update) => {
+            if (from_local_update) {
+                var blob = new Blob([body], { type: content_type || 'image/png' })
+                img.src = URL.createObjectURL(blob)
+            } else {
+                img.src = ''
+                img.src = url
+            }
         },
         on_delete: () => {
-            img.src = URL.createObjectURL(new Blob([]))
+            img.src = ''
+            img.src = url
         },
         on_error: (error) => {
             console.error('Live image error for', url, error)
@@ -53,8 +59,10 @@ function sync(img) {
             if (!file || !file.type.startsWith('image/')) return
 
             var reader = new FileReader()
-            reader.onload = function() {
-                client.update(reader.result, file.type)
+            reader.onload = async function() {
+                await client.update(reader.result, file.type)
+                img.src = ''
+                img.src = url
             }
             reader.readAsArrayBuffer(file)
         })
@@ -86,9 +94,6 @@ var observer = new MutationObserver(function(mutations) {
             }
         })
         if (mutation.type === 'attributes' && mutation.target.tagName === 'IMG') {
-            // Ignore src changes to blob: URLs (our own updates)
-            if (mutation.attributeName === 'src' && mutation.target.src.startsWith('blob:'))
-                return
             if (mutation.target.hasAttribute('live'))
                 sync(mutation.target)
             else if (mutation.attributeName === 'live')
@@ -107,7 +112,7 @@ function init() {
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['live', 'droppable', 'src']
+        attributeFilter: ['live', 'droppable']
     })
 
     document.querySelectorAll('img[live]').forEach(sync)
