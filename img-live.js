@@ -13,25 +13,35 @@ function sync(img) {
     unsync(img)
 
     var ac = new AbortController()
-    var client = braid_blob_client(url, {
-        signal: ac.signal,
-        on_update: (body, content_type, version, from_local_update) => {
-            if (from_local_update) {
-                var blob = new Blob([body], { type: content_type || 'image/png' })
-                img.src = URL.createObjectURL(blob)
-            } else {
+    var client_p = (async () => {
+        var res = await braid_fetch(url, {
+            method: 'HEAD',
+            headers: { "Merge-Type": "aww" },
+            subscribe: true,
+            retry: () => true,
+            signal: ac.signal
+        })
+        return braid_blob_client(url, {
+            signal: ac.signal,
+            parents: res.version,
+            on_update: (body, content_type, version, from_local_update) => {
+                if (from_local_update) {
+                    var blob = new Blob([body], { type: content_type || 'image/png' })
+                    img.src = URL.createObjectURL(blob)
+                } else {
+                    img.src = ''
+                    img.src = url
+                }
+            },
+            on_delete: () => {
                 img.src = ''
                 img.src = url
+            },
+            on_error: (error) => {
+                console.error('Live image error for', url, error)
             }
-        },
-        on_delete: () => {
-            img.src = ''
-            img.src = url
-        },
-        on_error: (error) => {
-            console.error('Live image error for', url, error)
-        }
-    })
+        })
+    })()
     live_images.set(img, ac)
 
     if (img.hasAttribute('droppable')) {
@@ -60,7 +70,7 @@ function sync(img) {
 
             var reader = new FileReader()
             reader.onload = async function() {
-                await client.update(reader.result, file.type)
+                await (await client_p).update(reader.result, file.type)
                 img.src = url
             }
             reader.readAsArrayBuffer(file)

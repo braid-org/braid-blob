@@ -22,7 +22,7 @@
 //
 function braid_blob_client(url, params = {}) {
     var peer = params.peer || Math.random().toString(36).slice(2)
-    var current_version = null
+    var current_version = params.parents || null
 
     braid_fetch(url, {
         headers: { "Merge-Type": "aww" },
