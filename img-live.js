@@ -9,19 +9,28 @@ function sync(img) {
     var url = img.src
     if (!url) return
 
+    // Find an unused query parameter name for cache-busting
+    var param = 'img-live'
+    var u = new URL(url)
+    while (u.searchParams.has(param)) param = '-' + param
+    function cache_bust() {
+        u.searchParams.set(param, Math.random().toString(36).slice(2))
+        return u.toString()
+    }
+
     // Unsync first to handle attribute changes (e.g. droppable added/removed)
     unsync(img)
 
     var ac = new AbortController()
     var client_p = (async () => {
-        var res = await braid_fetch(url, {
+        var res = await braid_fetch(cache_bust(), {
             method: 'HEAD',
             headers: { "Merge-Type": "aww" },
             subscribe: true,
             retry: () => true,
             signal: ac.signal
         })
-        return braid_blob_client(url, {
+        return braid_blob_client(cache_bust(), {
             signal: ac.signal,
             parents: res.version,
             on_update: (body, content_type, version, from_local_update) => {
@@ -30,12 +39,12 @@ function sync(img) {
                     img.src = URL.createObjectURL(blob)
                 } else {
                     img.src = ''
-                    img.src = url
+                    img.src = cache_bust()
                 }
             },
             on_delete: () => {
                 img.src = ''
-                img.src = url
+                img.src = cache_bust()
             },
             on_error: (error) => {
                 console.error('Live image error for', url, error)
@@ -71,7 +80,7 @@ function sync(img) {
             var reader = new FileReader()
             reader.onload = async function() {
                 await (await client_p).update(reader.result, file.type)
-                img.src = url
+                img.src = cache_bust()
             }
             reader.readAsArrayBuffer(file)
         })
