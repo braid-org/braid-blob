@@ -14,19 +14,59 @@
             border: 2px solid #ccc;
             border-radius: 8px;
         }
-        .controls {
+        .image-entry {
             margin: 20px 0;
         }
-        input[type="file"] {
-            margin-right: 10px;
+        .image-entry button {
+            margin-top: 8px;
+            padding: 4px 12px;
+            cursor: pointer;
+        }
+        .add-controls {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .add-controls input[type="text"] {
+            padding: 6px 10px;
+            width: 300px;
+            font-size: 14px;
+        }
+        .add-controls button {
+            padding: 6px 14px;
+            cursor: pointer;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
     <h1>Braid-Blob Live Image Demo</h1>
-    <p>This image updates in real-time across all connected clients.</p>
+    <p>These images update in real-time across all connected clients. Drag and drop to change them.</p>
 
-    <img live droppable src="/blob.png">
+    <div id="images">
+        <div class="image-entry">
+            <img live droppable src="/blob.png"><br>
+            <button onclick="this.parentElement.remove()">Delete</button>
+        </div>
+    </div>
+
+    <div class="add-controls">
+        <input type="text" id="new-url" placeholder="/path/to/image.png" value="/">
+        <button onclick="addImage()">Add Live Image</button>
+    </div>
+
+    <script>
+    function addImage() {
+        var url = document.getElementById('new-url').value.trim()
+        if (!url) return
+        var div = document.createElement('div')
+        div.className = 'image-entry'
+        div.innerHTML = '<img live droppable src="' + url.replace(/"/g, '&quot;') + '"><br>'
+            + '<button onclick="this.parentElement.remove()">Delete</button>'
+        document.getElementById('images').appendChild(div)
+    }
+    </script>
 
     <script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
     <script src="client.js"></script>
