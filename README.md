@@ -347,21 +347,26 @@ Parameters:
 
 ## Live Image Polyfill
 
-A polyfill that automatically syncs any `<img>` element with a `live` attribute. Images update in real-time whenever the blob changes on the server.
+A polyfill for real-time collaborative images. Add `live` to any `<img>` element to keep it synced across all clients, and add `droppable` to let users drag-and-drop or paste new images directly onto it.
 
 ```html
 <script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
 <script src="https://unpkg.com/braid-blob/client.js"></script>
 <script src="https://unpkg.com/braid-blob/img-live.js"></script>
 
+<!-- Read-only: stays in sync with the server -->
 <img live src="/blob.png">
+
+<!-- Read-write: users can drag-and-drop or paste to update -->
+<img live droppable src="/blob.png">
 ```
 
-That's it! The image will automatically stay synchronized with the server. When any client updates `/blob.png`, all `<img live src="/blob.png">` elements will update in real-time.
+That's it! When any client updates `/blob.png`, all `<img live src="/blob.png">` elements across all clients will update in real-time. With `droppable`, users can drag and drop an image file onto the element, or click it and paste from the clipboard — the new image is uploaded to the server and synced to everyone.
 
-The polyfill:
+Under the hood, the polyfill:
 - Observes the DOM for `<img live>` elements (added, removed, or attribute changes)
-- Creates a `braid_blob_client` subscription for each live image
+- Creates a `braid_blob_client` subscription for each unique image URL, shared across elements
+- Appends a cache-busting query parameter (e.g. `?img-live=k7x2f9m`) to ensure the browser doesn't serve stale versions
 - Cleans up subscriptions when images are removed from the DOM
 
 ## Improving this Package

@@ -69,6 +69,8 @@ function sync(img) {
     if (sub.current_src) img.src = sub.current_src
 
     if (img.hasAttribute('droppable')) {
+        if (!img.hasAttribute('tabindex')) img.setAttribute('tabindex', '0')
+
         img.addEventListener('dragenter', function() {
             img.style.outline = '3px dashed #007bff'
             img.style.outlineOffset = '3px'
@@ -96,6 +98,38 @@ function sync(img) {
             reader.onload = () => sub.update(reader.result, file.type)
             reader.readAsArrayBuffer(file)
         })
+
+        img.addEventListener('click', function() {
+            img.focus()
+        })
+
+        img.addEventListener('focus', function() {
+            img.style.outline = '3px dashed #007bff'
+            img.style.outlineOffset = '3px'
+
+            document.addEventListener('paste', on_paste)
+        })
+
+        img.addEventListener('blur', function() {
+            img.style.outline = ''
+            img.style.outlineOffset = ''
+
+            document.removeEventListener('paste', on_paste)
+        })
+
+        function on_paste(e) {
+            var items = e.clipboardData.items
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                    e.preventDefault()
+                    var file = items[i].getAsFile()
+                    var reader = new FileReader()
+                    reader.onload = () => sub.update(reader.result, file.type)
+                    reader.readAsArrayBuffer(file)
+                    break
+                }
+            }
+        }
     }
 }
 
