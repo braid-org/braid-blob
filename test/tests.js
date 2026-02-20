@@ -431,6 +431,66 @@ runTest(
 )
 
 runTest(
+    "test braid_blob.list() returns all keys",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                var bb = braid_blob.create_braid_blob()
+                bb.db_folder = db_folder
+                bb.meta_folder = meta_folder
+
+                try {
+                    // Initially should be empty
+                    var keys0 = await bb.list()
+                    if (keys0.length !== 0) {
+                        res.end('error: expected empty list, got ' + JSON.stringify(keys0))
+                        return
+                    }
+
+                    // Add some keys
+                    await bb.put('/file-a', Buffer.from('aaa'), { version: ['1'] })
+                    await bb.put('/file-b', Buffer.from('bbb'), { version: ['1'] })
+                    await bb.put('/file-c', Buffer.from('ccc'), { version: ['1'] })
+
+                    var keys1 = await bb.list()
+                    if (keys1.length !== 3) {
+                        res.end('error: expected 3 keys, got ' + keys1.length)
+                        return
+                    }
+                    if (!keys1.includes('/file-a') || !keys1.includes('/file-b') || !keys1.includes('/file-c')) {
+                        res.end('error: missing keys, got ' + JSON.stringify(keys1))
+                        return
+                    }
+
+                    // Delete one and verify it's gone from list
+                    await bb.delete('/file-b')
+                    var keys2 = await bb.list()
+                    if (keys2.length !== 2 || keys2.includes('/file-b')) {
+                        res.end('error: after delete, got ' + JSON.stringify(keys2))
+                        return
+                    }
+
+                    res.end('true')
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
     "test that aborting cleans up subscription",
     async () => {
         var r1 = await braid_fetch(`/eval`, {

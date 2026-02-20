@@ -443,6 +443,11 @@ function create_braid_blob() {
         })
     }
 
+    braid_blob.list = async () => {
+        await braid_blob.init()
+        return braid_blob.meta_db.prepare(`SELECT key FROM meta`).all().map(row => row.key)
+    }
+
     braid_blob.init = async () => {
         // We only want to initialize once
         var init_p = real_init()
