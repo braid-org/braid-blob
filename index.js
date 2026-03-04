@@ -452,6 +452,15 @@ function create_braid_blob() {
         return keys
     }
 
+    // exists() checks whether a key is present, with an optional callback
+    // to process the result atomically (same pattern as list())
+    braid_blob.exists = async (key, cb) => {
+        await braid_blob.init()
+        var exists = !!braid_blob.meta_db.prepare(`SELECT 1 FROM meta WHERE key = ?`).get(key)
+        if (cb) cb(exists)
+        return exists
+    }
+
     braid_blob.init = async () => {
         // We only want to initialize once
         var init_p = real_init()

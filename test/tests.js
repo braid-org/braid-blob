@@ -560,6 +560,77 @@ runTest(
 )
 
 runTest(
+    "test braid_blob.exists() checks key presence",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                var bb = braid_blob.create_braid_blob()
+                bb.db_folder = db_folder
+                bb.meta_folder = meta_folder
+
+                try {
+                    // Should not exist yet
+                    var e1 = await bb.exists('/ex-a')
+                    if (e1 !== false) {
+                        res.end('error: expected false before put, got ' + e1)
+                        return
+                    }
+
+                    // Add a key
+                    await bb.put('/ex-a', Buffer.from('aaa'), { version: ['1'] })
+
+                    // Should exist now
+                    var e2 = await bb.exists('/ex-a')
+                    if (e2 !== true) {
+                        res.end('error: expected true after put, got ' + e2)
+                        return
+                    }
+
+                    // Other key should not exist
+                    var e3 = await bb.exists('/ex-b')
+                    if (e3 !== false) {
+                        res.end('error: expected false for missing key, got ' + e3)
+                        return
+                    }
+
+                    // Delete and verify gone
+                    await bb.delete('/ex-a')
+                    var e4 = await bb.exists('/ex-a')
+                    if (e4 !== false) {
+                        res.end('error: expected false after delete, got ' + e4)
+                        return
+                    }
+
+                    // Test callback receives the result
+                    await bb.put('/ex-c', Buffer.from('ccc'), { version: ['1'] })
+                    var cb_val = null
+                    var ret_val = await bb.exists('/ex-c', (v) => { cb_val = v })
+                    if (cb_val !== true || ret_val !== true) {
+                        res.end('error: callback=' + cb_val + ', return=' + ret_val)
+                        return
+                    }
+
+                    res.end('true')
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
     "test that aborting cleans up subscription",
     async () => {
         var r1 = await braid_fetch(`/eval`, {
