@@ -491,6 +491,75 @@ runTest(
 )
 
 runTest(
+    "test braid_blob.list() callback receives keys atomically",
+    async () => {
+        var r1 = await braid_fetch(`/eval`, {
+            method: 'POST',
+            body: `void (async () => {
+                var fs = require('fs').promises
+                var test_id = 'test-db-' + Math.random().toString(36).slice(2)
+                var db_folder = __dirname + '/' + test_id + '-db'
+                var meta_folder = __dirname + '/' + test_id + '-meta'
+
+                var bb = braid_blob.create_braid_blob()
+                bb.db_folder = db_folder
+                bb.meta_folder = meta_folder
+
+                try {
+                    await bb.put('/cb-a', Buffer.from('aaa'), { version: ['1'] })
+                    await bb.put('/cb-b', Buffer.from('bbb'), { version: ['1'] })
+
+                    // Test that callback receives the keys
+                    var cb_keys = null
+                    var returned_keys = await bb.list((keys) => { cb_keys = keys })
+
+                    if (!cb_keys) {
+                        res.end('error: callback was not called')
+                        return
+                    }
+                    if (cb_keys.length !== 2) {
+                        res.end('error: callback got ' + cb_keys.length + ' keys, expected 2')
+                        return
+                    }
+                    if (!cb_keys.includes('/cb-a') || !cb_keys.includes('/cb-b')) {
+                        res.end('error: callback missing keys, got ' + JSON.stringify(cb_keys))
+                        return
+                    }
+
+                    // Test that return value still works
+                    if (returned_keys.length !== 2) {
+                        res.end('error: return value got ' + returned_keys.length + ' keys, expected 2')
+                        return
+                    }
+
+                    // Test that callback and return value are the same array
+                    if (cb_keys !== returned_keys) {
+                        res.end('error: callback and return value are not the same array')
+                        return
+                    }
+
+                    // Test that list() still works without a callback
+                    var no_cb_keys = await bb.list()
+                    if (no_cb_keys.length !== 2) {
+                        res.end('error: no-callback list got ' + no_cb_keys.length + ' keys')
+                        return
+                    }
+
+                    res.end('true')
+                } catch (e) {
+                    res.end('error: ' + e.message)
+                } finally {
+                    await fs.rm(db_folder, { recursive: true, force: true })
+                    await fs.rm(meta_folder, { recursive: true, force: true })
+                }
+            })()`
+        })
+        return await r1.text()
+    },
+    'true'
+)
+
+runTest(
     "test that aborting cleans up subscription",
     async () => {
         var r1 = await braid_fetch(`/eval`, {

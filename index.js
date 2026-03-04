@@ -443,9 +443,13 @@ function create_braid_blob() {
         })
     }
 
-    braid_blob.list = async () => {
+    // list() accepts an optional callback to process keys atomically,
+    // avoiding races where the set of keys changes between await and processing
+    braid_blob.list = async (cb) => {
         await braid_blob.init()
-        return braid_blob.meta_db.prepare(`SELECT key FROM meta`).all().map(row => row.key)
+        var keys = braid_blob.meta_db.prepare(`SELECT key FROM meta`).all().map(row => row.key)
+        if (cb) cb(keys)
+        return keys
     }
 
     braid_blob.init = async () => {
