@@ -349,6 +349,8 @@ Parameters:
 
 A polyfill for real-time collaborative images. Add `live` to any `<img>` element to keep it synced across all clients, and add `droppable` to let users drag-and-drop or paste new images directly onto it.
 
+See the [demo from braid meeting-129](https://braid.org/video/https://invisiblecollege.s3.us-west-1.amazonaws.com/braid-meeting-129.mp4#2583).
+
 ```html
 <script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
 <script src="https://unpkg.com/braid-blob/client.js"></script>
