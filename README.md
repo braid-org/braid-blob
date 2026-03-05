@@ -57,7 +57,7 @@ Braid-blob speaks [Braid-HTTP](https://github.com/braid-org/braid-spec), an exte
 | Header | Description |
 |--------|-------------|
 | `Version` | Unique identifier for this version of the blob (e.g., `"1768467700.000"`) |
-| `Version-Type` | How to interpret the structure of version strings (e.g., [`wallclockish`](https://braid.org/protocol/version-types/wallclockish)); see [Version-Type spec](https://github.com/braid-org/braid-spec/blob/master/draft-toomim-httpbis-versions-03.txt) |
+| `Version-Type` | How to interpret the structure of version strings (e.g., [`wallclockish`](https://braid.org/protocol/version-types/wallclockish)); see [Version-Type spec](https://datatracker.ietf.org/doc/html/draft-toomim-httpbis-versions) |
 | `Parents` | The previous version |
 | `Merge-Type` | How conflicts resolve consistently (*e.g.* `aww` for [arbitrary-writer-wins](https://braid.org/protocol/merge-types/aww)) |
 | `Subscribe` | In GET, subscribes client to all future changes |
