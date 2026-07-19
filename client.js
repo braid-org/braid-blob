@@ -33,10 +33,12 @@ function braid_blob_client(url, params = {}) {
         signal: params.signal
     }).then(res => {
         res.subscribe(async update => {
-            if (update.status == 404) {
+            if (update.status === 404 || update.status === 410) {
                 current_version = null
                 return params.on_delete?.()
             }
+
+            if (update.status && update.status !== 200) return // e.g. 304: no new state
 
             // Only update if version is newer
             var version = update.version

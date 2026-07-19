@@ -1,107 +1,172 @@
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 10px;
-    }
-    .test {
-        margin-bottom: 3px;
-        padding: 3px;
-    }
-    .running {
-        background-color: #fffde7;
-    }
-    .passed {
-        background-color: #e8f5e9;
-    }
-    .failed {
-        background-color: #ffebee;
-    }
-    #summaryContainer {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin-bottom: 20px;
-    }
-    .summaryBox {
-        width: 25px;
-        height: 25px;
-        border: 1px solid #ddd;
-    }    
-</style>
-<script src="https://unpkg.com/braid-http@~1.3/braid-http-client.js"></script>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .content-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th:first-child, td:first-child {
+            width: 60%;
+        }
+        th:not(:first-child), td:not(:first-child) {
+            width: 40%;
+            overflow: scroll;
+            white-space: nowrap;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .queued {
+            background-color: #e0e0e0;
+        }
+        .running {
+            background-color: #fffde7;
+        }
+        .passed {
+            background-color: #e8f5e9;
+        }
+        .failed {
+            background-color: #ffebee;
+        }
+        .section-header {
+            background-color: #fefefe;
+            font-weight: bold;
+        }
+        #summaryContainer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+        .summaryBox {
+            width: 25px;
+            height: 25px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<script src="/braid-http-client.js"></script>
 <script src="./tests.js"></script>
-<div id="summaryContainer"></div>
-<div id="testContainer"></div>
+
+<div class="content-container">
+    <div id="summaryContainer"></div>
+    <table id="testTable">
+        <tr>
+            <th>Name</th>
+            <th>Result</th>
+        </tr>
+    </table>
+</div>
 <script type=module>
 
-braid_fetch.enable_multiplex = false
+var port = parseInt(location.port)
+var delay = 0
 
 // Parse URL parameters for filter
-const urlParams = new URLSearchParams(window.location.search)
-const filterArg = urlParams.get('filter') || urlParams.get('grep')
+var url_params = new URLSearchParams(window.location.search)
+var filter_arg = url_params.get('filter') || url_params.get('grep')
 
-let delay = 0
-
-function createTestDiv(testName) {
-    const div = document.createElement("div")
-    div.className = "test running"
-    div.innerHTML = `<span style="font-weight:bold">${testName}: </span><span class="result">Running...</span>`
-    testContainer.appendChild(div)
-    return div
+function create_test_row(test_name) {
+    var row = document.createElement("tr")
+    row.innerHTML = `
+        <td>${test_name}</td>
+        <td class="result">Queued...</td>
+    `
+    row.className = "queued"
+    testTable.appendChild(row)
+    return row
 }
 
-function updateTestResult(div, passed, message, got, expected) {
-    div.className = `test ${passed ? "passed" : "failed"}`
-
-    if (passed) {
-        div.querySelector(".result").textContent = message
-        div.querySelector(".result").style.fontSize = message.length > 400 ? 'xx-small' : message.length > 100 ? 'small' : ''
-    } else {
-        div.querySelector(".result").innerHTML = `${message}<br><strong>Got:</strong> ${got}<br><strong>Expected:</strong> ${expected}`
-    }
+function update_test_result(row, status, got) {
+    row.className = status
+    row.querySelector(".result").textContent = got
 }
 
-function createSummaryBox() {
-    var summaryContainer = document.getElementById('summaryContainer')
-    const box = document.createElement('div');
-    box.className = 'summaryBox running';
-    summaryContainer.appendChild(box);
-    return box;
+function add_section_header(header_text) {
+    var row = document.createElement("tr")
+    var cell = document.createElement("td")
+    cell.textContent = header_text
+    cell.className = "section-header"
+    cell.setAttribute("colspan", "2")
+    row.appendChild(cell)
+    testTable.appendChild(row)
 }
 
-function updateSummaryBox(box, passed) {
-    box.className = `summaryBox ${passed ? 'passed' : passed === false ? 'failed' : 'other'}`;
+var summaryContainer = document.getElementById('summaryContainer')
+
+function create_summary_box() {
+    var box = document.createElement('div')
+    box.className = 'summaryBox queued'
+    summaryContainer.appendChild(box)
+    return box
 }
 
-async function runTest(testName, testFunction, expectedResult) {
+function update_summary_box(box, passed) {
+    box.className = `summaryBox ${passed ? 'passed' : 'failed'}`
+}
+
+function assert(condition, message) {
+    if (!condition) throw new Error(message || 'Assertion failed')
+}
+
+function run_test(test_name, test_function, expected_result) {
     // Apply filter if specified
-    if (filterArg && !testName.toLowerCase().includes(filterArg.toLowerCase())) {
+    if (filter_arg && !test_name.toLowerCase().includes(filter_arg.toLowerCase())) {
         return // Skip this test
     }
 
-    delay += 70
+    var row = create_test_row(test_name)
+    var summary_box = create_summary_box()
 
-    await new Promise(done => setTimeout(done, delay))
-    const div = createTestDiv(testName)
-    const summaryBox = createSummaryBox()
-    try {
-        let x = await testFunction()
-        if (x == expectedResult) {
-            updateTestResult(div, true, x)
-            updateSummaryBox(summaryBox, true)
-        } else {
-            updateTestResult(div, false, "Mismatch:", x, expectedResult)
-            updateSummaryBox(summaryBox, false)
+    // Stagger the tests' start times, so they don't all fire at once
+    delay += 70
+    var my_delay = delay
+
+    ;(async () => {
+        await new Promise(done => setTimeout(done, my_delay))
+
+        summary_box.className = 'summaryBox running'
+        update_test_result(row, 'running', 'Running...')
+
+        try {
+            var got = await test_function()
+            if (expected_result === undefined) {
+                // Assertion-style test: success simply means it returned
+                // (without throwing). An assert() failure throws and is
+                // handled by the catch below.
+                update_test_result(row, 'passed', 'passed')
+                update_summary_box(summary_box, true)
+            } else if (got == expected_result) {
+                update_test_result(row, 'passed', got)
+                update_summary_box(summary_box, true)
+            } else {
+                update_test_result(row, 'failed', `${got} (expected: ${expected_result})`)
+                update_summary_box(summary_box, false)
+            }
+        } catch (error) {
+            update_test_result(row, 'failed', error.message || error)
+            update_summary_box(summary_box, false)
         }
-    } catch (error) {
-        updateTestResult(div, false, "Error:", error.message || error, expectedResult)
-        updateSummaryBox(summaryBox, false)
-    }
+    })()
 }
 
 // Load and run all tests from the shared tests.js file
-defineTests(runTest, braid_fetch)
+define_tests(run_test, { braid_fetch, assert, add_section_header, port })
 
 </script>
