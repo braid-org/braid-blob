@@ -30,7 +30,7 @@ function define_tests(run_test, context) {
         return await r.text()
     }
 
-add_section_header("Peer Tests")
+add_section_header("Peer")
 
 run_test(
     "test that peer.txt gets initialized on a fresh run",
@@ -111,7 +111,7 @@ run_test(
     }
 )
 
-add_section_header("HTTP Tests")
+add_section_header("HTTP")
 
 run_test(
     "test that PUTing with shorter event id doesn't do anything.",
@@ -346,7 +346,7 @@ run_test(
     }
 )
 
-add_section_header("Local API Tests")
+add_section_header("Local API")
 
 run_test(
     "test braid_blob.delete() directly",
@@ -508,7 +508,7 @@ run_test(
     }
 )
 
-add_section_header("Versioning and Subscription Tests")
+add_section_header("Versioning and Subscription")
 
 run_test(
     "test that subscribe returns current-version header",
@@ -854,7 +854,7 @@ run_test(
     }
 )
 
-add_section_header("URL API Tests")
+add_section_header("URL API")
 
 run_test(
     "test put with URL (no content_type)",
@@ -977,7 +977,7 @@ run_test(
     }
 )
 
-add_section_header("Sync Tests")
+add_section_header("Sync")
 
 run_test(
     "sync() local to remote",
@@ -1299,7 +1299,7 @@ run_test(
     undefined, {timeout: 5000}
 )
 
-add_section_header("Filename Encoding Tests")
+add_section_header("Filename Encoding")
 
 run_test(
     "test that meta filenames distinguish between 'a' and 'A' on case-insensitive filesystems",
@@ -1350,7 +1350,7 @@ run_test(
     }
 )
 
-add_section_header("Persistence Tests")
+add_section_header("Persistence")
 
 run_test(
     "test multiple writes preserve correct mtime across restarts",
@@ -1438,7 +1438,7 @@ run_test(
     }
 )
 
-add_section_header("Abort Signal Tests")
+add_section_header("Abort Signal")
 
 run_test(
     "test signal abort stops local put operation",
@@ -1558,7 +1558,7 @@ run_test(
     }
 )
 
-add_section_header("Custom DB Tests")
+add_section_header("Custom DB")
 
 run_test(
     "test options.db in put writes to custom db",
@@ -1707,7 +1707,7 @@ run_test(
     }
 )
 
-add_section_header("Atomic Write Tests")
+add_section_header("Atomic Write")
 
 run_test(
     "test atomic write creates temp_folder on init",
@@ -1826,7 +1826,7 @@ run_test(
     }
 )
 
-add_section_header("Options and Validation Tests")
+add_section_header("Options and Validation")
 
 run_test(
     "test that headers with different casing are normalized correctly",
@@ -2142,7 +2142,7 @@ run_test(
     }
 )
 
-add_section_header("Caching and ETag Tests")
+add_section_header("Caching and ETag")
 
 run_test(
     "test that GET sends ETag and Cache-Control: no-cache",
