@@ -32,6 +32,7 @@ function braid_blob_client(url, params = {}) {
         retry: () => true,
         signal: params.signal
     }).then(res => {
+        var repr_type = res.headers.get('repr-type') || undefined
         res.subscribe(async update => {
             if (update.status === 404 || update.status === 410) {
                 current_version = null
@@ -40,13 +41,13 @@ function braid_blob_client(url, params = {}) {
 
             if (update.status && update.status !== 200) return // e.g. 304: no new state
 
+            if (update.repr_type) repr_type = update.repr_type
+
             // Only update if version is newer
             var version = update.version
             if (compare_events(version?.[0], current_version?.[0]) > 0) {
                 current_version = version
-                params.on_update?.(update.body,
-                    update.extra_headers?.['content-type'],
-                    current_version)
+                params.on_update?.(update.body, repr_type, current_version)
             }
         }, e => params.on_error?.(e))
     }).catch(e => params.on_error?.(e))
@@ -60,7 +61,7 @@ function braid_blob_client(url, params = {}) {
             await braid_fetch(url, {
                 method: 'PUT',
                 version: current_version,
-                headers: { 'Content-Type': content_type },
+                repr_type: content_type,
                 peer,
                 retry: () => true,
                 body

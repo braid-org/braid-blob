@@ -6,14 +6,14 @@ function assert(condition, message) {
 
 function create_braid_blob() {
     var braid_blob = {
-        db_folder: null, // defaults to './braid-blobs'
-        meta_folder: null, // defaults to './braid-blobs'
-        temp_folder: null, // defaults to './braid-blobs'
-        cache: {},
-        subscriptions_to: {},
-        peer: null, // will be auto-generated if not set by the user
-        db: null, // object with read/write/delete methods
-        meta_db: null, // sqlite database for meta storage
+        db_folder:          null, // defaults to './braid-blobs'
+        meta_folder:        null, // defaults to './braid-blobs'
+        temp_folder:        null, // defaults to './braid-blobs'
+        cache:              {},
+        subscriptions_to:   {},
+        peer:               null, // will be auto-generated if not set by the user
+        db:                 null, // object with read/write/delete methods
+        meta_db:            null, // sqlite database for meta storage
         reconnect_delay_ms: 1000,
     }
 
@@ -152,8 +152,11 @@ function create_braid_blob() {
                         res.setHeader("Version-Type", "wallclockish")
                         if (!req.subscribe && result.version?.length)
                             res.setHeader('ETag', version_to_etag(result.version[0]))
-                        if (result.content_type)
-                            res.setHeader('Content-Type', result.content_type)
+                        if (result.content_type) {
+                            res.setHeader('Repr-Type', result.content_type)
+                            if (!req.subscribe)
+                                res.setHeader('Content-Type', result.content_type)
+                        }
                     },
                     before_send_cb: () => res.startSubscription(),
                     subscribe: req.subscribe ? (update) => {
@@ -170,7 +173,7 @@ function create_braid_blob() {
                                 'Cache-Control': 'no-cache',
                             }
                         if (update.content_type) {
-                            update['Content-Type'] = update.content_type
+                            update.repr_type = update.content_type
                             delete update.content_type
                         }
                         update['Merge-Type'] = 'aww'
@@ -280,12 +283,14 @@ function create_braid_blob() {
             if (params.head) return result
 
             if (params.subscribe) {
+                var repr_type = res.headers.get('repr-type') || undefined
                 res.subscribe(async update => {
                     if (update.status === 404 || update.status === 410)
                         update.delete = true
                     else if (update.status && update.status !== 200)
                         return // e.g. 304: no new state to apply
-                    update.content_type = update.extra_headers['content-type']
+                    if (update.repr_type) repr_type = update.repr_type
+                    update.content_type = repr_type
                     await params.subscribe(update)
                 }, e => params.on_error?.(e))
                 return res
@@ -405,9 +410,9 @@ function create_braid_blob() {
                 ...(!params.dont_retry         && {retry: () => true}),
                 ...(params.version != null     && {version: params.version}),
                 ...(params.peer != null        && {peer: params.peer}),
+                ...(params.content_type        && {repr_type: params.content_type}),
                 headers: {
                     ...params.headers,
-                    ...(params.content_type    && {'Content-Type': params.content_type}),
                     ...(params.version         && {'Version-Type': 'wallclockish'})
                 }
             })

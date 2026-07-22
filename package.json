@@ -1,6 +1,6 @@
 {
   "name": "braid-blob",
-  "version": "0.0.85",
+  "version": "0.0.86",
   "description": "Library for collaborative blobs over http using braid.",
   "author": "Braid Working Group",
   "repository": "braid-org/braid-blob",
@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "braid-http": "~1.4.0"
+    "braid-http": "~1.4.1"
   }
 }
