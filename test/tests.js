@@ -1074,10 +1074,12 @@ run_test(
 run_test(
     "sync() connect does not read file body for version check",
     async () => {
-        // Can flake in browser mode, which runs tests concurrently: this test
-        // and "If-None-Match saves the disk read too" both temporarily wrap
-        // the server's global db.read, and overlapping wrap/restores can
-        // interleave. Node mode runs tests sequentially, and is reliable.
+        // This test and "If-None-Match saves the disk read too" both
+        // temporarily wrap the server's global db.read, and both count
+        // reads filtered to their own key. If their windows overlap (tests
+        // run concurrently), an interleaved restore can disarm a counter
+        // early -- which only undercounts, so the reads-stay-zero asserts
+        // can pass vacuously, never flake.
         var local_key = '/test-sync-no-read-' + Math.random().toString(36).slice(2)
         var remote_key = 'test-sync-no-read-remote-' + Math.random().toString(36).slice(2)
 
@@ -2362,18 +2364,19 @@ run_test(
 run_test(
     "test that If-None-Match saves the disk read too",
     async () => {
-        // Flaky in browser mode, which runs tests concurrently: this counts
-        // reads on the server's global db across ALL keys, so any concurrent
-        // test's traffic bumps the counter past the asserted 0. Node mode
-        // runs tests sequentially, and is reliable.
+        // Counts db reads filtered to our own random key, so concurrent
+        // tests' traffic can't bump the counter past the asserted 0
         await server_eval(async (req, res) => {
             var test_key = '/test-skip-read-' + Math.random().toString(36).slice(2)
             await braid_blob.put(test_key, Buffer.from('abc'), {version: ['301']})
 
-            // Count reads on the server's db
+            // Count reads of our key on the server's db
             var reads = 0
             var real_read = braid_blob.db.read
-            braid_blob.db.read = async (key) => { reads++; return real_read(key) }
+            braid_blob.db.read = async (key) => {
+                if (key === test_key) reads++
+                return real_read(key)
+            }
             try {
                 // A matching plain GET: 304, and no disk read
                 var r = await braid_fetch('http://localhost:' + port + test_key,

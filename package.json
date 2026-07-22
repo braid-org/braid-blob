@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "braid-http": "~1.4.1"
+    "braid-http": "~1.4.2"
   }
 }

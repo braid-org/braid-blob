@@ -5,6 +5,15 @@ var http = require('http')
 var {fetch: braid_fetch} = require('braid-http')
 var define_tests = require('./tests.js')
 
+// The shared runner (braid-http/run-tests) parses --filter/--serial/
+// --in-parallel/--hangs, runs the pool, and prints the reports; this file
+// hosts it: the braid-blob server, the fetch wrapper, and browser mode
+var runner = require('braid-http/run-tests')({
+    braid_fetch,
+    rerun_command: 'node test/test.js'
+})
+var { run_test, add_section_header, log, claim_request, test_context } = runner
+
 // Parse command line arguments
 var args = process.argv.slice(2)
 var mode = args.includes('--browser') || args.includes('-b') ? 'browser' : 'console'
@@ -12,9 +21,6 @@ var port = parseInt(process.env.PORT
     || args.find(arg => arg.startsWith('--port='))?.split('=')[1]
     || args.find(arg => !arg.startsWith('-') && !isNaN(arg))
     || 8889)
-var filter_arg = args.find(arg => arg.startsWith('--filter='))?.split('=')[1]
-    || args.find(arg => arg.startsWith('--grep='))?.split('=')[1]
-var show_hangs = args.includes('--hangs') && require('./show-hangs.js')
 
 // Show help if requested
 if (args.includes('--help') || args.includes('-h')) {
@@ -27,7 +33,9 @@ Options:
   PORT                   Port number as positional argument
   --filter=PATTERN       Only run tests matching pattern (case-insensitive)
   --grep=PATTERN         Alias for --filter
-  --hangs                When a test times out, print what it's stuck waiting on
+  --in-parallel=N        Run up to N tests at once (default 16)
+  --serial               Run tests one at a time
+  --hangs                When a test times out, print what it's stuck waiting on (implies --serial)
   --help, -h             Show this help message
 
 Examples:
@@ -40,13 +48,6 @@ Examples:
 `)
     process.exit(0)
 }
-
-process.on("unhandledRejection", (x) =>
-    console.log(`unhandledRejection: ${x?.stack || x}`)
-)
-process.on("uncaughtException", (x) =>
-    console.log(`uncaughtException: ${x.stack}`)
-)
 
 // Tests assert() inline instead of returning values to compare. This lives at
 // module scope so that code the tests server_eval() can assert too -- eval'd
@@ -63,8 +64,7 @@ function assert(condition, message) {
 function create_test_server(options = {}) {
     var {
         port = 8889,
-        run_tests = false,
-        log_requests = false
+        run_tests = false
     } = options
 
     var braid_blob = require(`${__dirname}/../index.js`)
@@ -91,9 +91,8 @@ function create_test_server(options = {}) {
     }
 
     var server = http.createServer(async (req, res) => {
-        if (log_requests) {
-            console.log(`${req.method} ${req.url}`)
-        }
+        claim_request(req)
+        log(req)
 
         // Free the CORS
         free_cors(res)
@@ -106,10 +105,12 @@ function create_test_server(options = {}) {
                 req.on('end', () => done(Buffer.concat(chunks)))
             })
             try {
-                // Await the eval'd code, so that a thrown error -- like a
-                // failed server-side assert() -- comes back as a 500 whose
-                // message fails the test
-                await eval(body.toString('utf8'))
+                // Await the eval'd code -- inside the requesting test's
+                // context, so anything it logs files under that test -- and
+                // a thrown error (like a failed server-side assert()) comes
+                // back as a 500 whose message fails the test
+                await test_context.run(req.test_report,
+                    () => eval(body.toString('utf8')))
             } catch (error) {
                 if (!res.headersSent) {
                     res.writeHead(500, { 'Content-Type': 'text/plain' })
@@ -166,81 +167,12 @@ function create_test_server(options = {}) {
 // ============================================================================
 
 async function run_console_tests() {
-    // Test tracking
-    var total_tests = 0
-    var passed_tests = 0
-    var failed_tests = 0
-    var skipped_tests = 0
-    var hung_test = false
-    var failed_test_names = []
-    var tests_to_run = []
-
-    function add_section_header(header_text) {
-        add_section_header.current_section = header_text
-    }
-
-    // Collects the tests, to run sequentially below (sequentially so that
-    // --hangs can attribute pending promises to the test that created them)
-    function run_test(test_name, test_function, expected_result, params) {
-        // Apply filter if specified
-        if (filter_arg && !test_name.toLowerCase().includes(filter_arg.toLowerCase())) {
-            skipped_tests++
-            return
-        }
-
-        total_tests++
-        var section = add_section_header.current_section
-        tests_to_run.push({test_name, test_function, expected_result, section, ...params})
-    }
-
-    async function run_one_test({test_name, test_function, expected_result,
-                                 timeout = 2000}) {
-        var timer = null
-        try {
-            var timed_out = new Promise((_, reject) =>
-                timer = setTimeout(() => {
-                    hung_test = true
-                    if (show_hangs) show_hangs.show()
-                    reject(new Error(`Test timed out after ${timeout/1000}s`))
-                }, timeout))
-
-            // mark() after creating the timeout promise, so it doesn't
-            // itself appear in the report of the test's hung promises
-            if (show_hangs) show_hangs.mark()
-
-            var result = await Promise.race([test_function(), timed_out])
-            if (expected_result === undefined || result == expected_result) {
-                // With no expected_result, this is an assertion-style test:
-                // success simply means it returned without throwing. An
-                // assert() failure throws and is handled by the catch below.
-                passed_tests++
-                console.log(`✓ ${test_name}`)
-            } else {
-                failed_tests++
-                failed_test_names.push(test_name)
-                console.log(`✗ ${test_name}`)
-                console.log(`  Expected: ${expected_result}`)
-                console.log(`  Got: ${result}`)
-            }
-        } catch (error) {
-            failed_tests++
-            failed_test_names.push(test_name)
-            console.log(`✗ ${test_name}`)
-            console.log(`  Error: ${error.message || error}`)
-        } finally {
-            // otherwise a passing test's timer fires later, and with
-            // --hangs would print a bogus report during a later test
-            clearTimeout(timer)
-        }
-    }
-
     console.log('Starting braid-blob tests...\n')
 
     // Create and start the test server
     var test_server = create_test_server({
         port,
-        run_tests: true,
-        log_requests: false
+        run_tests: true
     })
 
     await test_server.start()
@@ -259,40 +191,7 @@ async function run_console_tests() {
         base_url: `http://localhost:${port}`
     })
 
-    // Run tests sequentially
-    var current_section = null
-    for (var t of tests_to_run) {
-        if (t.section && t.section !== current_section) {
-            current_section = t.section
-            console.log(`\n--- ${current_section} ---`)
-        }
-        await run_one_test(t)
-    }
-
-    // Print summary
-    console.log('\n' + '='.repeat(50))
-    console.log(`Total: ${total_tests} | ✓: ${passed_tests} | ✗: ${failed_tests}`
-        + (skipped_tests ? ` | Skipped: ${skipped_tests}` : ''))
-    console.log('='.repeat(50))
-
-    if (failed_test_names.length) {
-        console.log('\nFailed tests:')
-        for (var name of failed_test_names)
-            console.log(`  ✗ ${name}`)
-
-        // Guide the reader to the two debugging tools: narrowing the run
-        // to one test, and (for hangs) the pending-promise report
-        var suggest_filter = !filter_arg
-        var suggest_hangs = hung_test && !show_hangs
-        if (suggest_filter || suggest_hangs) {
-            console.log(`\nTo debug, rerun a failing test by itself:`)
-            console.log(`  node test/test.js`
-                + (hung_test ? ' --hangs' : '')
-                + ` --filter='${filter_arg || failed_test_names[0]}'`)
-            if (suggest_hangs)
-                console.log(`  (--hangs prints what a hung test is stuck waiting on)`)
-        }
-    }
+    var failed = await runner.run()
 
     // Clean up test directories
     console.log('\nCleaning up test directories...')
@@ -317,13 +216,13 @@ async function run_console_tests() {
     }
 
     // Close the server and all its connections
-    test_server.server.close(() => process.exit(failed_tests > 0 ? 1 : 0))
+    test_server.server.close(() => process.exit(failed > 0 ? 1 : 0))
     if (typeof test_server.server.closeAllConnections === 'function')
         test_server.server.closeAllConnections()
 
     // Fallback: force exit after a short delay even if the server hasn't
     // fully closed
-    setTimeout(() => process.exit(failed_tests > 0 ? 1 : 0), 200)
+    setTimeout(() => process.exit(failed > 0 ? 1 : 0), 200)
 }
 
 // ============================================================================
@@ -333,8 +232,7 @@ async function run_console_tests() {
 async function run_browser_mode() {
     var test_server = create_test_server({
         port,
-        run_tests: false,
-        log_requests: true
+        run_tests: false
     })
 
     await test_server.start()
