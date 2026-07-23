@@ -61,14 +61,14 @@ function create_braid_blob() {
                             if (update.delete) {
                                 var res = await braid_blob.delete(remote_url, {
                                     ...remote_params,
-                                    content_type: update.content_type})
+                                    repr_type: update.repr_type})
                                 if (signal.aborted) return
                                 if (!res.ok) handle_error(new Error('failed to delete'))
                             } else {
                                 var res = await braid_blob.put(remote_url, update.body, {
                                     ...remote_params,
                                     version: update.version,
-                                    content_type: update.content_type})
+                                    repr_type: update.repr_type})
                                 if (signal.aborted) return
                                 if (res.status === 401 || res.status === 403)
                                     await params.on_unauthorized?.()
@@ -90,12 +90,12 @@ function create_braid_blob() {
                             if (update.delete)
                                 await braid_blob.delete(local_key, {
                                     ...local_params,
-                                    content_type: update.content_type})
+                                    repr_type: update.repr_type})
                             else
                                 await braid_blob.put(local_key, update.body, {
                                     ...local_params,
                                     version: update.version,
-                                    content_type: update.content_type})
+                                    repr_type: update.repr_type})
                         } catch (e) { handle_error(e) }
                     },
                     on_error: e => {
@@ -152,10 +152,10 @@ function create_braid_blob() {
                         res.setHeader("Version-Type", "wallclockish")
                         if (!req.subscribe && result.version?.length)
                             res.setHeader('ETag', version_to_etag(result.version[0]))
-                        if (result.content_type) {
-                            res.setHeader('Repr-Type', result.content_type)
+                        if (result.repr_type) {
+                            res.setHeader('Repr-Type', result.repr_type)
                             if (!req.subscribe)
-                                res.setHeader('Content-Type', result.content_type)
+                                res.setHeader('Content-Type', result.repr_type)
                         }
                     },
                     before_send_cb: () => res.startSubscription(),
@@ -172,10 +172,8 @@ function create_braid_blob() {
                                 ETag: version_to_etag(update.version[0]),
                                 'Cache-Control': 'no-cache',
                             }
-                        if (update.content_type) {
-                            update.repr_type = update.content_type
-                            delete update.content_type
-                        }
+                        // Drop the legacy alias; sendUpdate takes repr_type
+                        delete update.content_type
                         update['Merge-Type'] = 'aww'
                         update['Version-Type'] = 'wallclockish'
                         res.sendUpdate(update)
@@ -195,10 +193,10 @@ function create_braid_blob() {
                 return res.end('File Not Found')
             }
 
-            if (result.content_type && req.headers.accept &&
-                !isAcceptable(result.content_type, req.headers.accept)) {
+            if (result.repr_type && req.headers.accept &&
+                !isAcceptable(result.repr_type, req.headers.accept)) {
                 res.statusCode = 406
-                return res.end(`Content-Type of ${result.content_type} not in Accept: ${req.headers.accept}`)
+                return res.end(`Content-Type of ${result.repr_type} not in Accept: ${req.headers.accept}`)
             }
 
             if (!req.subscribe && result.not_modified) {
@@ -217,7 +215,7 @@ function create_braid_blob() {
             // Handle PUT request to update binary files
             var event = await braid_blob.put(params.key, body, {
                 version: req.version,
-                content_type: req.headers['content-type'],
+                repr_type: req.headers['repr-type'] || req.headers['content-type'],
                 peer: req.peer
             })
             res.setHeader("Current-Version", version_to_header(event != null ? [event] : []))
@@ -225,7 +223,7 @@ function create_braid_blob() {
             res.end('')
         } else if (req.method === 'DELETE') {
             await braid_blob.delete(params.key, {
-                content_type: req.headers['content-type'],
+                repr_type: req.headers['repr-type'] || req.headers['content-type'],
                 peer: req.peer
             })
             res.end('')
@@ -258,7 +256,7 @@ function create_braid_blob() {
                     ...params.headers,
 
                     //  if we have this...     ...the headers carry this:
-                    ...(params.content_type    && {'Accept': params.content_type}),
+                    ...(params.repr_type       && {'Accept': params.repr_type}),
                     ...((params.version ||
                          params.parents)       && {'Version-Type': 'wallclockish'}),
                     ...(params.if_none_match   && {'If-None-Match':
@@ -280,6 +278,12 @@ function create_braid_blob() {
             var result = {}
             if (res.version) result.version = res.version
 
+            // On a solo response the body is the representation, so its type
+            // may come as Repr-Type or (from older servers) Content-Type
+            if (!params.subscribe)
+                set_repr_type(result, res.headers.get('repr-type')
+                                      || res.headers.get('content-type'))
+
             if (params.head) return result
 
             if (params.subscribe) {
@@ -290,7 +294,7 @@ function create_braid_blob() {
                     else if (update.status && update.status !== 200)
                         return // e.g. 304: no new state to apply
                     if (update.repr_type) repr_type = update.repr_type
-                    update.content_type = repr_type
+                    set_repr_type(update, repr_type)
                     await params.subscribe(update)
                 }, e => params.on_error?.(e))
                 return res
@@ -321,10 +325,8 @@ function create_braid_blob() {
                     && !params.subscribe)
                     return null
 
-                var result = {
-                    version: meta.event ? [meta.event] : [],
-                    content_type: meta.content_type
-                }
+                var result = { version: meta.event ? [meta.event] : [] }
+                set_repr_type(result, meta.content_type)
 
                 // Set our response headers for hte .serve()
                 if (params.header_cb) await params.header_cb(result)
@@ -410,7 +412,7 @@ function create_braid_blob() {
                 ...(!params.dont_retry         && {retry: () => true}),
                 ...(params.version != null     && {version: params.version}),
                 ...(params.peer != null        && {peer: params.peer}),
-                ...(params.content_type        && {repr_type: params.content_type}),
+                ...(params.repr_type           && {repr_type: params.repr_type}),
                 headers: {
                     ...params.headers,
                     ...(params.version         && {'Version-Type': 'wallclockish'})
@@ -441,19 +443,16 @@ function create_braid_blob() {
                         await (params.db || braid_blob.db).write(key, body)
                     if (params.signal?.aborted) return
 
-                    if (params.content_type)
-                        meta.content_type = params.content_type
+                    if (params.repr_type)
+                        meta.content_type = params.repr_type
 
                     save_meta(key, meta)
                     if (params.signal?.aborted) return
 
                     // Notify all subscriptions of the update
                     // (except the peer which made the PUT request itself)
-                    var update = {
-                        version: [meta.event],
-                        content_type: meta.content_type,
-                        body
-                    }
+                    var update = { version: [meta.event], body }
+                    set_repr_type(update, meta.content_type)
                     if (braid_blob.subscriptions_to[key])
                         for (var [peer, sub] of braid_blob.subscriptions_to[key].entries())
                             if (!params.peer || params.peer !== peer)
@@ -483,7 +482,7 @@ function create_braid_blob() {
 
                 headers: {
                     ...params.headers,
-                    ...(params.content_type    && {'Accept': params.content_type})
+                    ...(params.repr_type       && {'Accept': params.repr_type})
                 }
             })
 
@@ -503,10 +502,8 @@ function create_braid_blob() {
 
                 // Notify all subscriptions of the delete
                 // (except the peer which made the DELETE request itself)
-                var update = {
-                    delete: true,
-                    content_type: meta.content_type
-                }
+                var update = { delete: true }
+                set_repr_type(update, meta.content_type)
                 if (braid_blob.subscriptions_to[key])
                     for (var [peer, sub] of braid_blob.subscriptions_to[key].entries())
                         if (!params.peer || params.peer !== peer)
@@ -877,13 +874,21 @@ function create_braid_blob() {
         return s
     }
 
+    // Results and updates carry the blob's type as repr_type, plus
+    // content_type as a legacy alias
+    function set_repr_type(obj, repr_type) {
+        if (repr_type)
+            obj.repr_type = obj.content_type = repr_type
+    }
+
     function normalize_params(params = {}) {
         if (!normalize_params.special) {
             normalize_params.special = {
                 version: 'version',
                 parents: 'parents',
-                'content-type': 'content_type',
-                accept: 'content_type',
+                'content-type': 'repr_type',
+                'repr-type': 'repr_type',
+                accept: 'repr_type',
                 peer: 'peer',
                 'if-none-match': 'if_none_match',
             }
@@ -892,10 +897,14 @@ function create_braid_blob() {
         var normalized = {}
         Object.assign(normalized, params)
 
-        // Normalize top-level accept to content_type
+        // Normalize the legacy names accept and content_type to repr_type
         if (params.accept) {
-            normalized.content_type = params.accept
+            normalized.repr_type = normalized.repr_type || params.accept
             delete normalized.accept
+        }
+        if (params.content_type) {
+            normalized.repr_type = normalized.repr_type || params.content_type
+            delete normalized.content_type
         }
 
         if (params.headers) {

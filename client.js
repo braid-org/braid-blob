@@ -4,9 +4,9 @@
 // Usage:
 //   var blob = braid_blob_client(url, {
 //       peer: 'my-peer-id', // optional, random if not set
-//       on_update: (body, content_type, version, from_local_update) => {
+//       on_update: (body, repr_type, version, from_local_update) => {
 //           // Called whenever there's a new version of the blob
-//           console.log('New blob:', body, content_type, version)
+//           console.log('New blob:', body, repr_type, version)
 //       },
 //       on_delete: () => {
 //           // Called when the blob is deleted (404 status)
@@ -53,15 +53,15 @@ function braid_blob_client(url, params = {}) {
     }).catch(e => params.on_error?.(e))
 
     return {
-        update: async (body, content_type) => {
+        update: async (body, repr_type) => {
             current_version = [create_event(current_version?.[0])]
 
-            params.on_update?.(body, content_type, current_version, true)
+            params.on_update?.(body, repr_type, current_version, true)
 
             await braid_fetch(url, {
                 method: 'PUT',
                 version: current_version,
-                repr_type: content_type,
+                repr_type,
                 peer,
                 retry: () => true,
                 body

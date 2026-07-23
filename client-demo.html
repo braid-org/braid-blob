@@ -98,15 +98,15 @@
 
         var client = braid_blob_client(blob_url, {
             peer: Math.random().toString(36).slice(2, 5),
-            on_update: (body, content_type, version) => {
+            on_update: (body, repr_type, version) => {
                 status.style.display = 'none'
 
                 version_el.innerHTML = `<span style="color: #999;">v:</span> ${version || '-'}`
-                type_el.innerHTML = `<span style="color: #999;">type:</span> ${content_type || '-'}`
+                type_el.innerHTML = `<span style="color: #999;">type:</span> ${repr_type || '-'}`
 
                 if (current_object_url) URL.revokeObjectURL(current_object_url)
 
-                var image_blob = new Blob([body], { type: content_type || 'image/png' })
+                var image_blob = new Blob([body], { type: repr_type || 'image/png' })
                 current_object_url = URL.createObjectURL(image_blob)
                 img.src = current_object_url
             },

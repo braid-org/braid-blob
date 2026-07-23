@@ -197,10 +197,10 @@ braid_blob.db_folder = './braid-blobs'       // Default: ./braid-blobs
 
 ```javascript
 // Get a local blob:
-var {body, version, content_type} = await braid_blob.get('foo')
+var {body, version, repr_type} = await braid_blob.get('foo')
 
 // Get a remote blob:
-var {body, version, content_type} = await braid_blob.get(new URL('https://foo.bar/baz'))
+var {body, version, repr_type} = await braid_blob.get(new URL('https://foo.bar/baz'))
 
 // Get a specific version of a remote blob:
 var {body} = await braid_blob.get(
@@ -211,7 +211,7 @@ var {body} = await braid_blob.get(
 // To subscribe to a remote blob, without storing updates locally:
 await braid_blob.get(new URL('https://foo.bar/baz'), {
     subscribe: (update) => {
-        console.log('Got update:', update.version, update.content_type)
+        console.log('Got update:', update.version, update.repr_type)
         // update.body contains the new blob data
     }
 })
@@ -229,13 +229,13 @@ Note: `.get()` with `subscribe` receives updates but does not store them locally
 
 ```javascript
 // Write to a local blob:
-await braid_blob.put('foo', Buffer.from('hello'), {content_type: 'text/plain'})
+await braid_blob.put('foo', Buffer.from('hello'), {repr_type: 'text/plain'})
 
 // Write to a remote blob:
 await braid_blob.put(
     new URL('https://foo.bar/baz'),
     Buffer.from('hello'),
-    {content_type: 'text/plain'}
+    {repr_type: 'text/plain'}
 )
 ```
 
@@ -260,12 +260,11 @@ Parameters:
 - `params` - Optional configuration object
   - `version` - Retrieve a specific version instead of the latest (e.g., `['1768467700.000']`)
   - `parents` - When subscribing, only receive updates newer than this version (e.g., `['1768467700.000']`)
-  - `subscribe` - Callback `(update) => {}` called with each update; `update` has `{body, version, content_type}`
-  - `head` - If `true`, returns only metadata (`{version, content_type}`) without the body—useful for checking if a blob exists or getting its current version
-  - `content_type` - Expected content type (sent as Accept header for remote URLs)
-  - `signal` - AbortSignal to cancel the request or stop a subscription
+  - `subscribe` - Callback `(update) => {}` called with each update; `update` has `{body, version, repr_type}`
+  - `head` - If `true`, returns only metadata (`{version, repr_type}`) without the body—useful for checking if a blob exists or getting its current version
+  - `repr_type` - Desired representation type. Sent as Accept header.  (The old name `content_type` still works as an alias.)
 
-Returns: `{version, body, content_type}` object, or `null` if the blob doesn't exist.  When subscribing to a remote URL, returns the fetch response object; updates are delivered via the callback.
+Returns: `{version, body, repr_type}` object, or `null` if the blob doesn't exist.  When subscribing to a remote URL, returns the fetch response object; updates are delivered via the callback.
 
 #### braid_blob.put(key, body, params)
 
@@ -276,8 +275,7 @@ Parameters:
 - `body` - The data to store (Buffer, ArrayBuffer, or Uint8Array)
 - `params` - Optional configuration object
   - `version` - Specify a version ID for this write (e.g., `['1768467700.000']`); if omitted, one is generated automatically
-  - `content_type` - MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
-  - `signal` - AbortSignal to cancel the request
+  - `repr_type` - MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
 
 #### braid_blob.delete(key, params)
 
@@ -286,7 +284,6 @@ Deletes a blob from local storage or a remote URL.
 Parameters:
 - `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to delete
 - `params` - Optional configuration object
-  - `signal` - AbortSignal for cancellation
 
 #### braid_blob.sync(key, url, params)
 
@@ -296,8 +293,7 @@ Parameters:
 - `key` - The local blob on disk (string)
 - `url` - Remote URL (URL object)
 - `params` - Optional configuration object
-  - `signal` - AbortSignal for cancellation (use to stop sync)
-  - `content_type` - Content type for requests
+  - `repr_type` - Type of the representation being synced
 
 #### braid_blob.serve(req, res, params)
 
@@ -320,9 +316,9 @@ A simple browser client (`client.js`) is included for subscribing to blob update
 <script>
     braid_blob_client('http://localhost:8888/blob.png', {
         // Called whenever the blob is updated
-        on_update: (blob, content_type, version) =>
+        on_update: (blob, repr_type, version) =>
             image.src = URL.createObjectURL(
-                new Blob([blob], { type: content_type })),
+                new Blob([blob], { type: repr_type })),
         on_delete: () => image.src = '',
         on_error: (e) => console.error('Error:', e)
     })
@@ -340,10 +336,9 @@ Subscribes to a blob endpoint, and calls `params.on_update()` with each update.
 Parameters:
 - `url` - The blob endpoint URL
 - `params` - Configuration object
-  - `on_update(blob, content_type, version)` - Callback for updates
+  - `on_update(blob, repr_type, version)` - Callback for updates
   - `on_delete` - Callback when blob is deleted
   - `on_error(e)` - Callback for errors
-  - `signal` - AbortSignal for cancellation
 
 ## Live Image Polyfill
 

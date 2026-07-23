@@ -47,18 +47,18 @@ function sync(img) {
             return braid_blob_client(cache_bust(), {
                 signal: sub.ac.signal,
                 parents: res.version,
-                on_update: (body, content_type, version, from_local_update) =>
+                on_update: (body, repr_type, version, from_local_update) =>
                     set_src(!from_local_update ? cache_bust() :
                         URL.createObjectURL(new Blob(
-                            [body], { type: content_type || 'image/png' }))),
+                            [body], { type: repr_type || 'image/png' }))),
                 on_delete: () => set_src(cache_bust()),
                 on_error: (error) =>
                     console.error('Live image error for', base_url, error)
             })
         })()
 
-        sub.update = async (body, content_type) => {
-            await (await client_p).update(body, content_type)
+        sub.update = async (body, repr_type) => {
+            await (await client_p).update(body, repr_type)
             set_src(cache_bust())
         }
     }
