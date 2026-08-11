@@ -132,12 +132,18 @@ function create_braid_blob() {
             if (!req.subscribe) res.setHeader("Accept-Subscribe", "true")
             res.setHeader("Merge-Type", "aww")
 
+            // Advertise range request support
+            if (!req.subscribe) res.setHeader("Accept-Ranges", "bytes")
+
             // Set "no-cache".  This makes etags the only way a browser can
             // reuse a cache, which makes caching more accurate, which goes
             // with our braidly ethos so I'm just making it default behavior
             // here.
             if (!req.subscribe && !res.hasHeader("cache-control"))
                 res.setHeader("Cache-Control", "no-cache")
+
+            // We don't do ranges over subscriptions yet
+            var range = req.subscribe ? null : parse_range(req.headers.range)
 
             try {
                 var result = await braid_blob.get(params.key, {
@@ -146,6 +152,9 @@ function create_braid_blob() {
                     version: req.version,
                     parents: req.parents,
                     if_none_match: etags_to_versions(req.headers['if-none-match']),
+                    range,
+                    if_range: etags_to_versions(req.headers['if-range']),
+                    as_stream: req.method === 'GET' && !req.subscribe,
                     header_cb: (result) => {
                         res.setHeader((req.subscribe ? "Current-" : "") +
                             "Version", version_to_header(result.version))
@@ -180,32 +189,86 @@ function create_braid_blob() {
                     } : null
                 })
             } catch (e) {
-                if (e.message && e.message.startsWith('unknown version')) {
-                    // Server doesn't have this version
-                    res.statusCode = 309
-                    res.statusMessage = 'Version Unknown Here'
-                    return res.end('')
+                // Bad Request
+                if (e.message && e.message.startsWith('bad request')) {
+                    res.statusCode = 400
+                    return res.end(e.message.replace(/^bad request: /, ''))
                 } else throw e
             }
 
+            // Not Found
             if (!result) {
                 res.statusCode = 404
                 return res.end('File Not Found')
             }
 
+            // Version Not Found
+            if (result.status === 432) {
+                res.statusCode = result.status
+                res.statusMessage = result.status_text
+                res.setHeader("Version-Type", "wallclockish")
+                if (result.version)
+                    res.setHeader('Version', version_to_header(result.version))
+                if (result.parents)
+                    res.setHeader('Parents', version_to_header(result.parents))
+                return res.end('')
+            }
+
+            // Range Not Satisfiable
+            if (result.status === 416) {
+                res.statusCode = result.status
+                res.statusMessage = result.status_text
+                res.setHeader('Content-Range',
+                    `${range.unit} */${result.repr_length}`)
+                return res.end('')
+            }
+
+            // Not Acceptable
             if (result.repr_type && req.headers.accept &&
                 !isAcceptable(result.repr_type, req.headers.accept)) {
                 res.statusCode = 406
+                // we opened a stream we won't send
+                ;(result.patches?.[0].content ?? result.body)?.destroy?.()
                 return res.end(`Content-Type of ${result.repr_type} not in Accept: ${req.headers.accept}`)
             }
 
+            // Not Modified
             if (!req.subscribe && result.not_modified) {
                 res.statusCode = 304
                 return res.end()
             }
 
-            if (req.method == "HEAD") return res.end('')
-            else if (!req.subscribe) return res.end(result.body)
+            // Partial Content
+            if (result.patches) {
+                res.statusCode = 206
+                res.statusMessage = 'Partial Content'
+                res.setHeader('Content-Range', `${result.patches[0].unit} ` +
+                    `${result.patches[0].range}/${result.repr_length}`)
+            }
+
+            if (req.method == "HEAD") {
+                // A HEAD reports what a GET would send, where res.end('')
+                // would say zero
+                if (result.repr_length != null)
+                    res.setHeader('Content-Length', result.repr_length)
+                return res.end('')
+            }
+            else if (!req.subscribe) {
+                var content = result.patches ? result.patches[0].content : result.body
+                if (typeof content?.pipe !== 'function') return res.end(content)
+
+                // Node falls back to chunking without an explicit length
+                var length = result.repr_length
+                if (result.patches) {
+                    var [start, end] = result.patches[0].range.split('-').map(Number)
+                    length = end - start + 1
+                }
+                res.setHeader('Content-Length', length)
+                return require('stream').pipeline(content, res, (e) => {
+                    // No headers left to report an error in; just hang up
+                    if (e) res.destroy(e)
+                })
+            }
             else {
                 // If no immediate update was sent,
                 // get the node http code to send headers
@@ -233,6 +296,10 @@ function create_braid_blob() {
     braid_blob.get = async (key, params = {}) => {
         params = normalize_params(params)
 
+        // A subscription starts from Parents, not Version
+        if (params.subscribe && params.version)
+            throw new Error('bad request: Version cannot be used with Subscribe')
+
         // If the key is a URL, then fetch it from remote server!
         if (key instanceof URL) {
 
@@ -250,7 +317,7 @@ function create_braid_blob() {
 
                 // Retry unless the status is a final answer
                 ...(!params.dont_retry         && {retry: res =>
-                    ![304, 309, 404, 406].includes(res.status)}),
+                    ![304, 309, 404, 406, 432].includes(res.status)}),
 
                 headers: {
                     ...params.headers,
@@ -328,18 +395,26 @@ function create_braid_blob() {
                 var result = { version: meta.event ? [meta.event] : [] }
                 set_repr_type(result, meta.content_type)
 
+                if (!params.subscribe) {
+                    // The spec requires a 432 to echo back the version it
+                    // could not satisfy.  We keep no history, so the current
+                    // version is the only one we have.  Use compare_events,
+                    // since wallclockish versions can differ in trailing zeros.
+                    if (params.version &&
+                        compare_events(params.version[0], meta.event) !== 0)
+                        return {status: 432, status_text: 'Version Not Found',
+                                version: params.version}
+
+                    // Only a newer Parents is one we don't have: an older one
+                    // is a client catching up
+                    if (compare_events(params.parents?.[0], meta.event) > 0)
+                        return {status: 432, status_text: 'Version Not Found',
+                                parents: params.parents}
+                }
+
                 // Set our response headers for hte .serve()
                 if (params.header_cb) await params.header_cb(result)
                 if (params.signal?.aborted) return
-
-                // Check if requested version/parents is newer than what we have.
-                // If so, we don't have it.
-                if (!params.subscribe) {
-                    if (compare_events(params.version?.[0], meta.event) > 0)
-                        throw new Error('unknown version: ' + params.version)
-                    if (compare_events(params.parents?.[0], meta.event) > 0)
-                        throw new Error('unknown version: ' + params.parents)
-                }
 
                 // Handle etags.
                 // If the client tells us (via if_none_match) that it already has this version...
@@ -347,7 +422,25 @@ function create_braid_blob() {
                     // Return not_modified and skip the body.  serve() will render a 304.
                     result.not_modified = true
 
-                if (params.head) return result
+                var db = params.db || braid_blob.db
+
+                // A stale If-Range means the blob changed under the client,
+                // which wants the whole thing rather than a slice of it
+                var range = params.range
+                if (range && params.if_range &&
+                    !params.if_range.includes(result.version[0]))
+                    range = null
+
+                if (params.head) {
+                    if (db.open) {
+                        var handle = await db.open(key)
+                        if (handle) {
+                            result.repr_length = handle.size
+                            await handle.close()
+                        }
+                    }
+                    return result
+                }
 
                 if (params.subscribe) {
                     // Return subscription
@@ -384,13 +477,50 @@ function create_braid_blob() {
                     if (compare_events(result.version?.[0], params.parents?.[0]) > 0) {
                         result.sent = true
                         if (!result.not_modified)
-                            result.body = await (params.db || braid_blob.db).read(key)
+                            result.body = await db.read(key)
                         params.my_subscribe(result)
                     }
-                } else {
-                    // If not subscribe, send the body now
-                    if (!result.not_modified)
-                        result.body = await (params.db || braid_blob.db).read(key)
+                } else if (!result.not_modified) {
+                    // If not subscribe, send the body now.
+                    var streaming = params.as_stream && db.open
+
+                    // Ranges resolve against the length, and streams declare
+                    // it as Content-Length
+                    var handle = null, whole = null, repr_length = null
+                    if (range || streaming) {
+                        if (db.open) {
+                            handle = await db.open(key)
+                            repr_length = handle?.size ?? 0
+                        } else {
+                            whole = await db.read(key)
+                            repr_length = whole?.length ?? 0
+                        }
+                        result.repr_length = repr_length
+                    }
+
+                    var offsets = range ? resolve_range(range, repr_length) : null
+                    if (range && offsets === null) {
+                        await handle?.close()
+                        result.status = 416
+                        result.status_text = 'Range Not Satisfiable'
+                        return result
+                    }
+                    if (offsets === undefined) offsets = null
+
+                    var content
+                    if (streaming && handle) content = handle.stream(offsets)
+                    else {
+                        await handle?.close()
+                        content = whole
+                            ? (offsets ? whole.subarray(offsets.start,
+                                                        offsets.end + 1) : whole)
+                            : await db.read(key, offsets)
+                    }
+
+                    // A range answers with patches, fragments scoped by range
+                    if (offsets) result.patches = [{unit: range.unit,
+                        range: `${offsets.start}-${offsets.end}`, content}]
+                    else result.body = content
                 }
 
                 return result
@@ -478,7 +608,7 @@ function create_braid_blob() {
 
                 // Retry unless the status is a final answer
                 ...(!params.dont_retry         && {retry: res =>
-                    ![309, 404, 406].includes(res.status)}),
+                    ![309, 404, 406, 432].includes(res.status)}),
 
                 headers: {
                     ...params.headers,
@@ -631,13 +761,41 @@ function create_braid_blob() {
             if (typeof braid_blob.db_folder === 'string') {
                 await require('fs').promises.mkdir(braid_blob.db_folder, { recursive: true })
                 braid_blob.db = {
-                    read: async (key) => {
+                    // The whole blob, or just the bytes between the given
+                    // start and end offsets, inclusive
+                    read: async (key, offsets) => {
                         var file_path = `${braid_blob.db_folder}/${encode_filename(key)}`
                         try {
-                            return await require('fs').promises.readFile(file_path)
+                            if (!offsets)
+                                return await require('fs').promises.readFile(file_path)
+
+                            var file = await require('fs').promises.open(file_path)
+                            try {
+                                var len = offsets.end - offsets.start + 1
+                                var buf = Buffer.allocUnsafe(len)
+                                var {bytesRead} = await file.read(buf, 0, len, offsets.start)
+                                return bytesRead === len ? buf : buf.subarray(0, bytesRead)
+                            } finally { await file.close() }
                         } catch (e) {
                             if (e.code === 'ENOENT') return null
                             throw e
+                        }
+                    },
+                    // Opens the blob for its size and bytes.  Writes replace
+                    // the file by rename, so a handle keeps seeing one version.
+                    open: async (key) => {
+                        var file_path = `${braid_blob.db_folder}/${encode_filename(key)}`
+                        try {
+                            var file = await require('fs').promises.open(file_path)
+                        } catch (e) {
+                            if (e.code === 'ENOENT') return null
+                            throw e
+                        }
+                        return {
+                            size: (await file.stat()).size,
+                            stream: (offsets) => file.createReadStream(
+                                offsets && {start: offsets.start, end: offsets.end}),
+                            close: () => file.close(),
                         }
                     },
                     write: async (key, data) => {
@@ -801,6 +959,31 @@ function create_braid_blob() {
         return versions
     }
 
+    // Decodes a Range header: "bytes=500-600" -> {unit, range}.  The form
+    // of the range string is up to the unit.
+    function parse_range(header) {
+        var m = header?.match(/^\s*([^=\s]+)\s*=\s*(\S.*?)\s*$/)
+        return m && {unit: m[1].toLowerCase(), range: m[2]}
+    }
+
+    // Resolves a {unit, range} into inclusive start/end offsets.  undefined
+    // for a unit or form we don't support, null for one we can't satisfy.
+    function resolve_range(range, size) {
+        if (range.unit !== 'bytes') return undefined
+
+        // "500-600", "500-" (to the end), or "-500" (the last 500 bytes)
+        var m = range.range.match(/^(\d*)-(\d*)$/)
+        if (!m || (!m[1] && !m[2])) return undefined
+        var first = m[1] ? +m[1] : null, last = m[2] ? +m[2] : null
+
+        if (first == null) return last ? {start: Math.max(0, size - last),
+                                          end: size - 1} : null
+        if (last != null && last < first) return undefined  // invalid: ignore it
+        if (first >= size) return null
+        return {start: first, end: last == null ? size - 1
+                                                : Math.min(last, size - 1)}
+    }
+
     function isAcceptable(contentType, acceptHeader) {
         // If no Accept header or Accept is */*, accept everything
         if (!acceptHeader || acceptHeader === '*/*') return true;
@@ -891,6 +1074,8 @@ function create_braid_blob() {
                 accept: 'repr_type',
                 peer: 'peer',
                 'if-none-match': 'if_none_match',
+                range: 'range',
+                'if-range': 'if_range',
             }
         }
 
@@ -918,8 +1103,11 @@ function create_braid_blob() {
                     if (s === 'version' || s === 'parents')
                         v = JSON.parse('[' + v + ']')
                     // And decode etag header values into version ids
-                    if (s === 'if_none_match')
+                    if (s === 'if_none_match' || s === 'if_range')
                         v = etags_to_versions(v)
+                    // And decode the Range header into {unit, range}
+                    if (s === 'range')
+                        v = parse_range(v)
                     normalized[s] = v
                 }
                 else normalized.headers[k] = v
@@ -937,6 +1125,8 @@ function create_braid_blob() {
             normalized.parents = [normalized.parents]
         if (typeof normalized.if_none_match === 'string')
             normalized.if_none_match = [normalized.if_none_match]
+        if (typeof normalized.if_range === 'string')
+            normalized.if_range = [normalized.if_range]
         
         // Validate version and parents
         validate_version_array(normalized.version, 1)

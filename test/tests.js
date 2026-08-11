@@ -826,11 +826,10 @@ run_test(
         })
 
         // Try to GET with parents 200 (newer than what server has)
-        // This triggers the "unknown version" error which gets caught and returns 309
         var r = await braid_fetch(`/${key}`, {
             parents: ['200']
         })
-        assert(r.status === 309, `expected 309, got: ${r.status}`)
+        assert(r.status === 432, `expected 432, got: ${r.status}`)
     }
 )
 
@@ -850,7 +849,7 @@ run_test(
         var r = await braid_fetch(`/${key}`, {
             version: ['200']
         })
-        assert(r.status === 309, `expected 309, got: ${r.status}`)
+        assert(r.status === 432, `expected 432, got: ${r.status}`)
     }
 )
 
@@ -1100,9 +1099,9 @@ run_test(
             // Wrap db.read to count calls for our specific key
             var read_count = 0
             var original_read = braid_blob.db.read
-            braid_blob.db.read = async function (key) {
+            braid_blob.db.read = async function (key, range) {
                 if (key === local_key) read_count++
-                return original_read.call(this, key)
+                return original_read.call(this, key, range)
             }
 
             try {
@@ -2373,9 +2372,9 @@ run_test(
             // Count reads of our key on the server's db
             var reads = 0
             var real_read = braid_blob.db.read
-            braid_blob.db.read = async (key) => {
+            braid_blob.db.read = async (key, range) => {
                 if (key === test_key) reads++
-                return real_read(key)
+                return real_read(key, range)
             }
             try {
                 // A matching plain GET: 304, and no disk read
@@ -2400,6 +2399,388 @@ run_test(
                 braid_blob.db.read = real_read
             }
         })
+    }
+)
+
+add_section_header("Range Requests")
+
+// Each test PUTs this 10-byte body, and asks for a slice of it
+async function put_alphabet(key) {
+    await braid_fetch(`/${key}`, {method: 'PUT', version: ['7'], body: '0123456789'})
+}
+
+run_test(
+    "test that GET advertises Accept-Ranges: bytes",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`)
+        assert(r.headers.get('accept-ranges') === 'bytes',
+            `got accept-ranges: ${r.headers.get('accept-ranges')}`)
+    }
+)
+
+run_test(
+    "test that a Range gets a 206 with Content-Range and just those bytes",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`, {headers: {Range: 'bytes=2-4'}})
+        assert(r.status === 206, `expected 206, got: ${r.status}`)
+        assert(r.headers.get('content-range') === 'bytes 2-4/10',
+            `got content-range: ${r.headers.get('content-range')}`)
+        var text = await r.text()
+        assert(text === '234', `got: ${text}`)
+    }
+)
+
+run_test(
+    "test that an open-ended Range reads to the end of the blob",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`, {headers: {Range: 'bytes=7-'}})
+        assert(r.status === 206, `expected 206, got: ${r.status}`)
+        assert(r.headers.get('content-range') === 'bytes 7-9/10',
+            `got content-range: ${r.headers.get('content-range')}`)
+        var text = await r.text()
+        assert(text === '789', `got: ${text}`)
+    }
+)
+
+run_test(
+    "test that a suffix Range reads the last bytes of the blob",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`, {headers: {Range: 'bytes=-3'}})
+        assert(r.status === 206, `expected 206, got: ${r.status}`)
+        assert(r.headers.get('content-range') === 'bytes 7-9/10',
+            `got content-range: ${r.headers.get('content-range')}`)
+        var text = await r.text()
+        assert(text === '789', `got: ${text}`)
+    }
+)
+
+run_test(
+    "test that a Range past the end of the blob gets a 416",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`, {headers: {Range: 'bytes=50-60'}})
+        assert(r.status === 416, `expected 416, got: ${r.status}`)
+        assert(r.headers.get('content-range') === 'bytes */10',
+            `got content-range: ${r.headers.get('content-range')}`)
+    }
+)
+
+run_test(
+    "test that a Range we don't support is ignored, sending the whole blob",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        // Multiple ranges, and non-byte units, both fall back to a full 200
+        for (var range of ['bytes=0-1,5-6', 'items=0-1']) {
+            var r = await braid_fetch(`/${key}`, {headers: {Range: range}})
+            assert(r.status === 200, `${range}: expected 200, got: ${r.status}`)
+            var text = await r.text()
+            assert(text === '0123456789', `${range}: got: ${text}`)
+        }
+    }
+)
+
+run_test(
+    "test that If-Range honors the Range only while the blob is unchanged",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`,
+            {headers: {Range: 'bytes=2-4', 'If-Range': '"7"'}})
+        assert(r.status === 206, `expected 206, got: ${r.status}`)
+        assert((await r.text()) === '234', 'wrong slice for a current If-Range')
+
+        // A stale If-Range means the client's copy is out of date, so it
+        // wants the whole blob rather than a slice of a different version
+        r = await braid_fetch(`/${key}`,
+            {headers: {Range: 'bytes=2-4', 'If-Range': '"6"'}})
+        assert(r.status === 200, `expected 200, got: ${r.status}`)
+        assert((await r.text()) === '0123456789', 'expected the whole blob')
+    }
+)
+
+run_test(
+    "test that HEAD reports the blob's size, so clients know what to ask for",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var r = await braid_fetch(`/${key}`, {method: 'HEAD'})
+        assert(r.status === 200, `expected 200, got: ${r.status}`)
+        assert(r.headers.get('content-length') === '10',
+            `got content-length: ${r.headers.get('content-length')}`)
+        assert(r.headers.get('accept-ranges') === 'bytes',
+            `got accept-ranges: ${r.headers.get('accept-ranges')}`)
+    }
+)
+
+run_test(
+    "test that a ranged get() only reads the bytes it needs",
+    async () => {
+        await server_eval(async (req, res) => {
+            var test_key = '/test-range-read-' + Math.random().toString(36).slice(2)
+
+            // Our own db: concurrent tests swap the shared braid_blob.db.read
+            var stored = Buffer.from('0123456789')
+            var asked_for = 'never called'
+            var db = {
+                read: async (key, offsets) => {
+                    asked_for = JSON.stringify(offsets)
+                    return offsets
+                        ? stored.subarray(offsets.start, offsets.end + 1) : stored
+                },
+                write: async (key, data) => { stored = Buffer.from(data) },
+                delete: async () => { stored = null },
+                open: async (key) => ({
+                    size: stored.length,
+                    stream: (offsets) => require('stream').Readable.from([offsets
+                        ? stored.subarray(offsets.start, offsets.end + 1) : stored]),
+                    close: async () => {},
+                }),
+            }
+            await braid_blob.put(test_key, Buffer.from('0123456789'),
+                {version: ['7'], db})
+
+            var r = await braid_blob.get(test_key,
+                {db, range: {unit: 'bytes', range: '2-4'}})
+            assert(r.body === undefined, 'a range answers with patches, not a body')
+            assert(r.patches.length === 1, 'patches=' + r.patches.length)
+            assert(r.patches[0].unit === 'bytes', 'unit=' + r.patches[0].unit)
+            assert(r.patches[0].range === '2-4', 'range=' + r.patches[0].range)
+            assert(r.patches[0].content.toString() === '234',
+                'got: ' + r.patches[0].content.toString())
+
+            // It asked the db for exactly those bytes, not the whole blob
+            assert(asked_for === '{"start":2,"end":4}', 'read got range: ' + asked_for)
+
+            // and the whole representation's length rides alongside repr_type
+            assert(r.repr_length === 10, 'repr_length=' + r.repr_length)
+
+            res.end('ok')
+        })
+    }
+)
+
+run_test(
+    "test that a GET for a version we don't have gets a 432, range or not",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['30'], body: '0123456789'})
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['40'], body: 'abcdefghij'})
+
+        // Any version but the current one is one we don't have
+        for (var headers of [
+            {Version: '"30"', 'Version-Type': 'wallclockish'},
+            {Version: '"30"', 'Version-Type': 'wallclockish', Range: 'bytes=0-4'},
+            {Version: '"50"', 'Version-Type': 'wallclockish'},
+            {Version: '"50"', 'Version-Type': 'wallclockish', Range: 'bytes=0-4'},
+        ]) {
+            var r = await braid_fetch(`/${key}`, {headers})
+            assert(r.status === 432,
+                `${JSON.stringify(headers)}: expected 432, got ${r.status}`)
+            assert((await r.text()) === '', 'expected no body on a 432')
+            // The 432 echoes back the version it could not satisfy
+            assert(r.headers.get('version') === headers.Version,
+                `expected Version: ${headers.Version}, got ${r.headers.get('version')}`)
+
+        }
+
+        // The current version is served normally, range and all
+        var r = await braid_fetch(`/${key}`,
+            {headers: {Version: '"40"', 'Version-Type': 'wallclockish'}})
+        assert(r.status === 200, `expected 200, got ${r.status}`)
+        assert((await r.text()) === 'abcdefghij', 'wrong body')
+
+        r = await braid_fetch(`/${key}`, {headers:
+            {Version: '"40"', 'Version-Type': 'wallclockish', Range: 'bytes=0-4'}})
+        assert(r.status === 206, `expected 206, got ${r.status}`)
+        assert((await r.text()) === 'abcde', 'wrong slice')
+    }
+)
+
+run_test(
+    "test that a Version on a subscribe GET is a 400",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['30'], body: 'hello'})
+
+        // A 400 even when the version named is the current one
+        for (var v of ['"30"', '"99"']) {
+            var ac = new AbortController()
+            var r = await braid_fetch(`/${key}`, {subscribe: true, signal: ac.signal,
+                headers: {Version: v, 'Version-Type': 'wallclockish'}})
+            assert(r.status === 400, `Version: ${v}: expected 400, got ${r.status}`)
+            ac.abort()
+        }
+
+        // Parents is how a subscription says where to start, and still works
+        var ac = new AbortController()
+        var r = await braid_fetch(`/${key}`, {subscribe: true, signal: ac.signal,
+            headers: {Parents: '"20"', 'Version-Type': 'wallclockish'}})
+        assert(r.status === 209, `expected 209, got ${r.status}`)
+        var u = await new Promise(done => r.subscribe(done, () => {}))
+        assert(new TextDecoder().decode(u.body) === 'hello',
+            'expected the subscription to deliver the blob')
+        ac.abort()
+    }
+)
+
+run_test(
+    "test that a status result says what the status means",
+    async () => {
+        await server_eval(async (req, res) => {
+            var test_key = '/test-status-text-' + Math.random().toString(36).slice(2)
+            await braid_blob.put(test_key, Buffer.from('0123456789'), {version: ['40']})
+
+            var unknown = await braid_blob.get(test_key, {version: ['30']})
+            assert(unknown.status === 432, 'status=' + unknown.status)
+            assert(unknown.status_text === 'Version Not Found',
+                'status_text=' + unknown.status_text)
+            assert(unknown.version[0] === '30', 'echoed version=' + unknown.version)
+
+            var unsatisfiable = await braid_blob.get(test_key,
+                {range: {unit: 'bytes', range: '50-60'}})
+            assert(unsatisfiable.status === 416, 'status=' + unsatisfiable.status)
+            assert(unsatisfiable.status_text === 'Range Not Satisfiable',
+                'status_text=' + unsatisfiable.status_text)
+            assert(unsatisfiable.repr_length === 10,
+                'repr_length=' + unsatisfiable.repr_length)
+
+            res.end('ok')
+        })
+    }
+)
+
+run_test(
+    "test that Parents still means 'I have this', so an old one is fine",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['30'], body: '0123456789'})
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['40'], body: 'abcdefghij'})
+
+        // An older Parents is a client catching up, it must not 432
+        var r = await braid_fetch(`/${key}`,
+            {headers: {Parents: '"30"', 'Version-Type': 'wallclockish'}})
+        assert(r.status === 200, `expected 200, got ${r.status}`)
+        assert((await r.text()) === 'abcdefghij', 'wrong body')
+
+        // But parents we've never heard of is still a 432
+        r = await braid_fetch(`/${key}`,
+            {headers: {Parents: '"50"', 'Version-Type': 'wallclockish'}})
+        assert(r.status === 432, `expected 432, got ${r.status}`)
+        assert(r.headers.get('parents') === '"50"',
+            `expected Parents: "50", got ${r.headers.get('parents')}`)
+    }
+)
+
+run_test(
+    "test that a Version equal but for trailing zeros still matches",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['1.5'], body: 'hello'})
+
+        // Wallclockish versions compare numerically, not as strings
+        var r = await braid_fetch(`/${key}`,
+            {headers: {Version: '"1.50"', 'Version-Type': 'wallclockish'}})
+        assert(r.status === 200, `expected 200, got ${r.status}`)
+        assert((await r.text()) === 'hello', 'wrong body')
+    }
+)
+
+run_test(
+    "test that a plain GET streams its body instead of buffering it",
+    async () => {
+        await server_eval(async (req, res) => {
+            var test_key = '/test-stream-' + Math.random().toString(36).slice(2)
+            await braid_blob.put(test_key, Buffer.from('0123456789'), {version: ['7']})
+
+            // serve() asks for a stream; a plain get() yields a buffer
+            var streamed = await braid_blob.get(test_key, {as_stream: true})
+            assert(typeof streamed.body?.pipe === 'function',
+                'expected a stream, got: ' + typeof streamed.body)
+            assert(streamed.repr_length === 10, 'repr_length=' + streamed.repr_length)
+
+            var chunks = []
+            for await (var c of streamed.body) chunks.push(c)
+            assert(Buffer.concat(chunks).toString() === '0123456789',
+                'got: ' + Buffer.concat(chunks).toString())
+
+            var buffered = await braid_blob.get(test_key)
+            assert(Buffer.isBuffer(buffered.body), 'expected a buffer by default')
+            assert(buffered.body.toString() === '0123456789',
+                'got: ' + buffered.body.toString())
+
+            res.end('ok')
+        })
+    }
+)
+
+run_test(
+    "test that rewriting a blob mid-stream doesn't tear the response",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        // Big enough that the response can't be sent in one chunk
+        var old_body = 'a'.repeat(4 * 1024 * 1024)
+        var new_body = 'b'.repeat(1024)
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['10'], body: old_body})
+
+        var r = await braid_fetch(`/${key}`)
+        var promised = +r.headers.get('content-length')
+        var version = r.headers.get('etag')
+
+        // Overwrite with a shorter, different body while the read is in flight
+        var read = r.text()
+        await braid_fetch(`/${key}`, {method: 'PUT', version: ['20'], body: new_body})
+        var text = await read
+
+        // Whichever version we were promised, the bytes must match it
+        var expected = version === '"10"' ? old_body : new_body
+        assert(text.length === promised,
+            `body is ${text.length} bytes but Content-Length said ${promised}`)
+        assert(text === expected,
+            `body doesn't match the ${version} it was served as`)
+    }
+)
+
+run_test(
+    "test that a subscription ignores Range, and streams whole versions",
+    async () => {
+        var key = 'test-' + Math.random().toString(36).slice(2)
+        await put_alphabet(key)
+
+        var updates = []
+        var ac = new AbortController()
+        var r = await braid_fetch(`/${key}`, {
+            subscribe: true, signal: ac.signal, headers: {Range: 'bytes=2-4'}})
+        assert(r.status === 209, `expected 209, got: ${r.status}`)
+        assert(!r.headers.get('content-range'),
+            `got content-range: ${r.headers.get('content-range')}`)
+        assert(!r.headers.get('accept-ranges'),
+            `got accept-ranges: ${r.headers.get('accept-ranges')}`)
+
+        await new Promise(done => {
+            r.subscribe(update => { updates.push(update); done() }, () => {})
+        })
+        ac.abort()
+
+        var body = new TextDecoder().decode(updates[0].body)
+        assert(body === '0123456789', `got: ${body}`)
     }
 )
 

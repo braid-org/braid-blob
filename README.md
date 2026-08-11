@@ -256,54 +256,61 @@ await braid_blob.delete(new URL('https://foo.bar/baz'))
 Retrieves a blob from local storage or a remote URL.
 
 Parameters:
-- `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
-- `params` - Optional configuration object
-  - `version` - Retrieve a specific version instead of the latest (e.g., `['1768467700.000']`)
-  - `parents` - When subscribing, only receive updates newer than this version (e.g., `['1768467700.000']`)
-  - `subscribe` - Callback `(update) => {}` called with each update; `update` has `{body, version, repr_type}`
-  - `head` - If `true`, returns only metadata (`{version, repr_type}`) without the body—useful for checking if a blob exists or getting its current version
-  - `repr_type` - Desired representation type. Sent as Accept header.  (The old name `content_type` still works as an alias.)
+- `key`: The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to read from
+- `params`: Optional configuration object
+ : `version`: Retrieve a specific version instead of the latest (e.g., `['1768467700.000']`)
+  - `parents`: When subscribing, only receive updates newer than this version (e.g., `['1768467700.000']`)
+  - `subscribe`: Callback `(update) => {}` called with each update; `update` has `{body, version, repr_type}`
+  - `head`: If `true`, returns only metadata (`{version, repr_type}`) without the body—useful for checking if a blob exists or getting its current version
+  - `repr_type`: Desired representation type. Sent as Accept header.  (The old name `content_type` still works as an alias.)
+  - `range`: Read just the `{unit, range}` part of the blob, where `unit` has to be `bytes`, and `range` is a string of the form `'500-600'`, `'500-'`, or `'-500'`.  Not supported over subscriptions.
+  - `if_range`: Array of version ids (e.g. `['1768467700.000']`).  Only honor `range` if the blob is still at one of them; otherwise the whole blob comes back
+  - `as_stream`: Return the content as a readable stream instead of a buffer
 
-Returns: `{version, body, repr_type}` object, or `null` if the blob doesn't exist.  When subscribing to a remote URL, returns the fetch response object; updates are delivered via the callback.
+Returns:
+ - `{version, body, repr_type}` for a snapshot
+ - `{version, patches, repr_type, repr_length}` for a range (where `patches` is an array of `{unit, range, content}`)
+ - `null` if the blob doesn't exist
+ - `{status, status_text, ...}` for other errors and such
 
 #### braid_blob.put(key, body, params)
 
 Writes a blob to local storage or a remote URL.  Any other peers synchronizing with this blob (via `.serve()`, `.sync()`, or `.get(.., {subscribe: ..})`) will be updated.
 
 Parameters:
-- `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
-- `body` - The data to store (Buffer, ArrayBuffer, or Uint8Array)
-- `params` - Optional configuration object
-  - `version` - Specify a version ID for this write (e.g., `['1768467700.000']`); if omitted, one is generated automatically
-  - `repr_type` - MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
+- `key`: The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to write to
+- `body`: The data to store (Buffer, ArrayBuffer, or Uint8Array)
+- `params`: Optional configuration object
+  - `version`: Specify a version ID for this write (e.g., `['1768467700.000']`); if omitted, one is generated automatically
+  - `repr_type`: MIME type of the blob (e.g., `'image/png'`, `'application/json'`)
 
 #### braid_blob.delete(key, params)
 
 Deletes a blob from local storage or a remote URL.
 
 Parameters:
-- `key` - The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to delete
-- `params` - Optional configuration object
+- `key`: The local blob (if string) or remote URL (if [URL object](https://nodejs.org/api/url.html#class-url)) to delete
+- `params`: Optional configuration object
 
 #### braid_blob.sync(key, url, params)
 
 Synchronizes a remote URL bidirectionally with a local blob on disk.  This performs two subscriptions (one to the remote, one to the local blob) and auto-forwards updates in both directions.
 
 Parameters:
-- `key` - The local blob on disk (string)
-- `url` - Remote URL (URL object)
-- `params` - Optional configuration object
-  - `repr_type` - Type of the representation being synced
+- `key`: The local blob on disk (string)
+- `url`: Remote URL (URL object)
+- `params`: Optional configuration object
+  - `repr_type`: Type of the representation being synced
 
 #### braid_blob.serve(req, res, params)
 
 Serves blob requests over HTTP.  Synchronizes the client issuing the given request with its blob on disk.
 
 Parameters:
-- `req` - HTTP request object
-- `res` - HTTP response object
-- `params` - Optional configuration object
-  - `key` - The blob on disk to sync with (default: the path from `req.url`)
+- `req`: HTTP request object
+- `res`: HTTP response object
+- `params`: Optional configuration object
+  - `key`: The blob on disk to sync with (default: the path from `req.url`)
 
 ## Browser Client API
 
@@ -334,11 +341,11 @@ braid_blob_client(url, params)
 Subscribes to a blob endpoint, and calls `params.on_update()` with each update.
 
 Parameters:
-- `url` - The blob endpoint URL
-- `params` - Configuration object
-  - `on_update(blob, repr_type, version)` - Callback for updates
-  - `on_delete` - Callback when blob is deleted
-  - `on_error(e)` - Callback for errors
+- `url`: The blob endpoint URL
+- `params`: Configuration object
+  - `on_update(blob, repr_type, version)`: Callback for updates
+  - `on_delete`: Callback when blob is deleted
+  - `on_error(e)`: Callback for errors
 
 ## Live Image Polyfill
 
