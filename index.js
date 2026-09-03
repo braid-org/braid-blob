@@ -27,9 +27,11 @@ function create_braid_blob() {
         // Set our peer ID.  Will prevent echoes.
         if (!params.peer) params.peer = Math.random().toString(36).slice(2)
 
-        reconnector(params.signal, (_e, count) => {
+        reconnector(params.signal, (e, count, attempt_ms) => {
             var delay = braid_blob.reconnect_delay_ms ?? Math.min(count, 3) * 1000
-            console.log(`disconnected from ${remote_url.href}, retrying in ${delay}ms`)
+            console.log(`disconnected from ${remote_url.href} after `
+                        + `${(attempt_ms / 1000).toFixed(1)}s, `
+                        + `retrying in ${delay}ms: ${describe_error(e)}`)
             return delay
         }, async (signal, handle_error) => {
             if (signal.aborted) return
@@ -1168,16 +1170,30 @@ function create_braid_blob() {
 
             var ac = current_inner_ac = new AbortController()
             var inner_signal = ac.signal
+            var started_at = Date.now()
 
             func(inner_signal, (e) => {
                 if (outter_signal?.aborted ||
                     inner_signal.aborted) return
 
                 ac.abort()
-                var delay = get_delay(e, ++reconnect_count)
+                var delay = get_delay(e, ++reconnect_count,
+                                      Date.now() - started_at)
                 setTimeout(connect, delay)
             })
         }
+    }
+
+    // fetch() reports every network failure as "TypeError: fetch failed" and
+    // hangs the real diagnosis off .cause, sometimes several links down.  The
+    // length cap stops a cause cycle from spinning here.
+    function describe_error(e) {
+        var chain = [`${e}`]
+        while (e?.cause && chain.length < 5) {
+            e = e.cause
+            chain.push(`${e}`)
+        }
+        return chain.join(' <- ')
     }
 
     braid_blob.create_braid_blob = create_braid_blob
